@@ -2,14 +2,11 @@ package database
 
 import (
 	"encoding/json"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
-	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -91,26 +88,6 @@ func TestMigrateSingleMachineSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	testSingleMachineMigration(t, db)
-}
-
-func TestMigrateSingleMachinePostgres(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("XUI_TEST_POSTGRES_DSN"))
-	if dsn == "" {
-		t.Skip("set XUI_TEST_POSTGRES_DSN to run the PostgreSQL migration test")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger:                                   logger.Discard,
-		DisableForeignKeyConstraintWhenMigrating: true,
-	})
-	if err != nil {
-		t.Fatalf("open postgres: %v", err)
-	}
-	legacy := singleMachineTestModels()
-	if err := db.Migrator().DropTable(legacy...); err != nil {
-		t.Fatalf("drop stale tables: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Migrator().DropTable(legacy...) })
 	testSingleMachineMigration(t, db)
 }
 

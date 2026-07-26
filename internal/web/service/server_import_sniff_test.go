@@ -13,11 +13,10 @@ func TestSniffImportKind(t *testing.T) {
 		header []byte
 		want   int
 	}{
-		{"pg custom archive", []byte("PGDMP\x01\x10\x04"), importKindPgDump},
 		{"raw sqlite database", []byte("SQLite format 3\x00rest of header"), importKindSQLiteDB},
 		{"sqlite cli dump without pragma", []byte("BEGIN TRANSACTION;\nCREATE TABLE t(i);"), importKindSQLiteDump},
 		{"bom and whitespace before pragma", []byte("\xef\xbb\xbf\r\n PRAGMA foreign_keys=OFF;"), importKindSQLiteDump},
-		{"plain-format postgres dump", []byte("--\n-- PostgreSQL database dump\n--"), importKindUnknown},
+		{"unsupported archive", []byte("PGDMP\x01\x10\x04"), importKindUnknown},
 		{"empty file", nil, importKindUnknown},
 	}
 	for _, tc := range cases {

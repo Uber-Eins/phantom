@@ -54,7 +54,8 @@ podman auto-update --dry-run
 ```
 
 镜像替换后，SQLite 数据仍保存在
-`$HOME/.local/share/phantom`。面板和 Xray 二进制不在容器内自行更新。
+`$HOME/.local/share/phantom`。面板仅通过 `stable` 镜像更新；Xray Core
+也可在仪表盘中单独切换版本。Xray 更新写入容器层，因此替换镜像后会恢复为镜像内置版本。
 
 ## 备份与恢复
 

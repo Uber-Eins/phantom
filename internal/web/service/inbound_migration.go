@@ -31,10 +31,8 @@ func (s *InboundService) MigrationRequirements() {
 	defer func() {
 		if err == nil {
 			tx.Commit()
-			if !database.IsPostgres() {
-				if dbErr := db.Exec(`VACUUM "main"`).Error; dbErr != nil {
-					logger.Warningf("VACUUM failed: %v", dbErr)
-				}
+			if dbErr := db.Exec(`VACUUM "main"`).Error; dbErr != nil {
+				logger.Warningf("VACUUM failed: %v", dbErr)
 			}
 		} else {
 			tx.Rollback()
@@ -51,33 +49,6 @@ func (s *InboundService) MigrationRequirements() {
 			return
 		}
 	}
-	// Normalize "enable" columns to boolean on Postgres. Legacy SQLite data
-	// (0/1 integers), partial migrations, or historical mixed write paths can
-	// leave the column as integer or with mixed
-	// interpretation. This (combined with the dialect-aware
-	// ClientTrafficEnableMergeExpr) prevents type problems in traffic updates.
-	if database.IsPostgres() {
-		// Use DO block so it is idempotent and doesn't fail if already boolean.
-		normalizeBool := func(table, col string) {
-			tx.Exec(fmt.Sprintf(`
-				DO $$
-				BEGIN
-					IF EXISTS (
-						SELECT 1 FROM information_schema.columns
-						WHERE table_name = '%s' AND column_name = '%s'
-						  AND data_type <> 'boolean'
-					) THEN
-						ALTER TABLE %s ALTER COLUMN %s
-							TYPE boolean USING (CASE WHEN %s::text IN ('1','true','t','yes') THEN true ELSE false END);
-					END IF;
-				END $$;`, table, col, table, col, col))
-		}
-		normalizeBool("inbounds", "enable")
-		normalizeBool("client_traffics", "enable")
-		normalizeBool("clients", "enable")
-		normalizeBool("outbound_subscriptions", "enabled")
-	}
-
 	// Fix inbounds based problems
 	var inbounds []*model.Inbound
 	err = tx.Model(model.Inbound{}).Where("protocol IN (?)", []string{"vmess", "vless", "trojan", "shadowsocks", "hysteria"}).Find(&inbounds).Error
@@ -168,15 +139,9 @@ func (s *InboundService) MigrationRequirements() {
 	tx.Where("inbound_id = 0").Delete(xray.ClientTraffic{})
 
 	// Legacy tag cleanup for old auto-generated tags (e.g. "0.0.0.0:443-...").
-	// Must be cross-DB: INSTR/REPLACE work on SQLite; Postgres needs position().
 	tagCleanup := `UPDATE inbounds
 		SET tag = REPLACE(tag, '0.0.0.0:', '')
 		WHERE INSTR(tag, '0.0.0.0:') > 0;`
-	if database.IsPostgres() {
-		tagCleanup = `UPDATE inbounds
-			SET tag = REPLACE(tag, '0.0.0.0:', '')
-			WHERE position('0.0.0.0:' in tag) > 0;`
-	}
 	err = tx.Exec(tagCleanup).Error
 	if err != nil {
 		return

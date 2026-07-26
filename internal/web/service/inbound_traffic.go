@@ -136,11 +136,8 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		}
 	}
 	now := time.Now().UnixMilli()
-	// Use atomic per-row UPDATE instead of read-modify-write Save. tx.Save
-	// issues UPDATEs in slice order, which varies between concurrent callers;
-	// on PostgreSQL two transactions locking the same rows in opposite order
-	// deadlock. An atomic "SET up = up + ?" never holds a row lock across a
-	// subsequent lock acquisition, so concurrent writers cannot deadlock.
+	// Use atomic per-row UPDATE instead of read-modify-write Save so concurrent
+	// traffic samples cannot overwrite one another.
 	for _, ct := range dbClientTraffics {
 		t, ok := trafficByEmail[ct.Email]
 		if !ok || (t.Up == 0 && t.Down == 0) {
@@ -163,7 +160,7 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 	// deadline) in-memory. Persist that conversion now since the traffic UPDATE
 	// above only touches up/down/last_online. Only converted emails are written:
 	// updating every polled row issued one no-op UPDATE per active client per
-	// poll. Sorted order keeps concurrent writers lock-compatible on Postgres.
+	// poll. Sorted order keeps writes deterministic.
 	for _, email := range slices.Sorted(maps.Keys(convertedExpiryByEmail)) {
 		if err = tx.Exec(
 			`UPDATE client_traffics SET expiry_time = ? WHERE email = ? AND expiry_time < 0`,

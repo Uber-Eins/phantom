@@ -21,32 +21,12 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
-	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 var db *gorm.DB
-
-const (
-	DialectSQLite   = "sqlite"
-	DialectPostgres = "postgres"
-)
-
-func IsPostgres() bool {
-	if db == nil {
-		return config.GetDBKind() == "postgres"
-	}
-	return db.Name() == "postgres"
-}
-
-func Dialect() string {
-	if db == nil {
-		return ""
-	}
-	return db.Name()
-}
 
 const (
 	defaultUsername = "admin"
@@ -71,9 +51,6 @@ func allModels() []any {
 func initModels() error {
 	models := allModels()
 	for _, mdl := range models {
-		if IsPostgres() && postgresModelSettled(mdl) {
-			continue
-		}
 		if err := db.AutoMigrate(mdl); err != nil {
 			if isIgnorableDuplicateColumnErr(db, err, mdl) {
 				log.Printf("Ignoring duplicate column during auto migration for %T: %v", mdl, err)
@@ -84,9 +61,6 @@ func initModels() error {
 		}
 	}
 	if err := dropLegacyInboundPortUnique(); err != nil {
-		return err
-	}
-	if err := dropLegacyForeignKeys(); err != nil {
 		return err
 	}
 	if err := pruneOrphanedClientInbounds(); err != nil {
@@ -105,45 +79,6 @@ func initModels() error {
 		return err
 	}
 	if err := migrateVmessRemovedSecurities(); err != nil {
-		return err
-	}
-	if IsPostgres() {
-		if err := resyncPostgresSequences(db, models); err != nil {
-			log.Printf("Error resyncing postgres sequences: %v", err)
-			return err
-		}
-	}
-	return nil
-}
-
-func postgresModelSettled(mdl any) bool {
-	migrator := db.Migrator()
-	if !migrator.HasTable(mdl) {
-		return false
-	}
-	stmt := &gorm.Statement{DB: db}
-	if err := stmt.Parse(mdl); err != nil || stmt.Schema == nil {
-		return false
-	}
-	for _, dbName := range stmt.Schema.DBNames {
-		if !migrator.HasColumn(mdl, dbName) {
-			return false
-		}
-	}
-	for _, idx := range stmt.Schema.ParseIndexes() {
-		if !migrator.HasIndex(mdl, idx.Name) {
-			return false
-		}
-	}
-	return true
-}
-
-func dropLegacyForeignKeys() error {
-	if !IsPostgres() {
-		return nil
-	}
-	if err := db.Exec("ALTER TABLE client_traffics DROP CONSTRAINT IF EXISTS fk_inbounds_client_stats").Error; err != nil {
-		log.Printf("Error dropping legacy foreign key fk_inbounds_client_stats: %v", err)
 		return err
 	}
 	return nil
@@ -185,9 +120,6 @@ func sqliteUniquePortIndexes() (autoIndexes, explicitIndexes []string, err error
 // dropLegacyInboundPortUnique removes the old UNIQUE on inbounds.port, which
 // AutoMigrate never drops. TCP and UDP inbounds may legitimately share a port.
 func dropLegacyInboundPortUnique() error {
-	if IsPostgres() {
-		return nil
-	}
 	autoIndexes, explicitIndexes, err := sqliteUniquePortIndexes()
 	if err != nil {
 		return err
@@ -709,8 +641,7 @@ func migrateVmessRemovedSecurities() error {
 // silently promoted to REAL, after which the column no longer scans into the
 // Go int64 field and every reader of the table fails (#5762). REAL cells are
 // cast back to INTEGER (SQLite caps the cast at math.MaxInt64), then values
-// are clamped into [0, TrafficMax] on both backends so the next delta cannot
-// overflow again.
+// are clamped into [0, TrafficMax] so the next delta cannot overflow again.
 func repairOverflowedTrafficCounters() error {
 	targets := []struct {
 		table   string
@@ -723,13 +654,9 @@ func repairOverflowedTrafficCounters() error {
 	for _, target := range targets {
 		for _, col := range target.columns {
 			statements := []string{
+				fmt.Sprintf("UPDATE %s SET %s = CAST(%s AS INTEGER) WHERE typeof(%s) = 'real'", target.table, col, col, col),
 				fmt.Sprintf("UPDATE %s SET %s = %d WHERE %s > %d", target.table, col, TrafficMax, col, TrafficMax),
 				fmt.Sprintf("UPDATE %s SET %s = 0 WHERE %s < 0", target.table, col, col),
-			}
-			if !IsPostgres() {
-				statements = append([]string{
-					fmt.Sprintf("UPDATE %s SET %s = CAST(%s AS INTEGER) WHERE typeof(%s) = 'real'", target.table, col, col, col),
-				}, statements...)
 			}
 			var repaired int64
 			for _, statement := range statements {
@@ -1457,63 +1384,40 @@ func InitDB(dbPath string) error {
 	}
 	c := &gorm.Config{Logger: gormLogger, DisableForeignKeyConstraintWhenMigrating: true}
 
-	var err error
-	switch config.GetDBKind() {
-	case "postgres":
-		dsn := config.GetDBDSN()
-		if dsn == "" {
-			return errors.New("XUI_DB_TYPE=postgres but XUI_DB_DSN is empty")
-		}
-		db, err = openPostgresWithRetry(dsn, c)
-		if err != nil {
-			return err
-		}
-	default:
-		dir := path.Dir(dbPath)
-		if err = os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-
-		sync := sqliteSynchronous()
-		journal := sqliteJournalMode()
-		dsn := dbPath + "?_journal_mode=" + journal + "&_busy_timeout=10000&_synchronous=" + sync + "&_txlock=immediate"
-		db, err = gorm.Open(sqlite.Open(dsn), c)
-		if err != nil {
-			return err
-		}
-		sqlDB, err := db.DB()
-		if err != nil {
-			return err
-		}
-
-		pragmas := []string{
-			"PRAGMA journal_mode=" + journal,
-			"PRAGMA busy_timeout=10000",
-			"PRAGMA synchronous=" + sync,
-			fmt.Sprintf("PRAGMA cache_size=-%d", envInt("XUI_DB_CACHE_MB", 32)*1024),
-			fmt.Sprintf("PRAGMA mmap_size=%d", int64(envInt("XUI_DB_MMAP_MB", 256))*1024*1024),
-			"PRAGMA temp_store=MEMORY",
-		}
-		for _, p := range pragmas {
-			if _, err := sqlDB.ExecContext(context.Background(), p); err != nil {
-				return err
-			}
-		}
+	dir := path.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
 	}
 
+	synchronous := sqliteSynchronous()
+	journal := sqliteJournalMode()
+	dsn := dbPath + "?_journal_mode=" + journal + "&_busy_timeout=10000&_synchronous=" + synchronous + "&_txlock=immediate"
+	var err error
+	db, err = gorm.Open(sqlite.Open(dsn), c)
+	if err != nil {
+		return err
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		return err
 	}
-	var maxOpen, maxIdle int
-	switch config.GetDBKind() {
-	case "postgres":
-		maxOpen = envInt("XUI_DB_MAX_OPEN_CONNS", 25)
-		maxIdle = envInt("XUI_DB_MAX_IDLE_CONNS", 25)
-	default:
-		maxOpen = envInt("XUI_DB_MAX_OPEN_CONNS", 8)
-		maxIdle = envInt("XUI_DB_MAX_IDLE_CONNS", 4)
+
+	pragmas := []string{
+		"PRAGMA journal_mode=" + journal,
+		"PRAGMA busy_timeout=10000",
+		"PRAGMA synchronous=" + synchronous,
+		fmt.Sprintf("PRAGMA cache_size=-%d", envInt("XUI_DB_CACHE_MB", 32)*1024),
+		fmt.Sprintf("PRAGMA mmap_size=%d", int64(envInt("XUI_DB_MMAP_MB", 256))*1024*1024),
+		"PRAGMA temp_store=MEMORY",
 	}
+	for _, pragma := range pragmas {
+		if _, err := sqlDB.ExecContext(context.Background(), pragma); err != nil {
+			return err
+		}
+	}
+
+	maxOpen := envInt("XUI_DB_MAX_OPEN_CONNS", 8)
+	maxIdle := envInt("XUI_DB_MAX_IDLE_CONNS", 4)
 	sqlDB.SetMaxOpenConns(maxOpen)
 	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
@@ -1535,31 +1439,6 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	return MigrateSingleMachine(db)
-}
-
-// openPostgresWithRetry retries the initial PostgreSQL connection with
-// backoff so a database that starts slower than the panel (or drops out
-// briefly) does not immediately kill the process and trip systemd's
-// restart loop. Every failed attempt logs the real driver error, which
-// used to be buried behind a generic startup failure.
-func openPostgresWithRetry(dsn string, c *gorm.Config) (*gorm.DB, error) {
-	delays := []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second}
-	var lastErr error
-	for i, delay := range delays {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		conn, err := gorm.Open(postgres.Open(dsn), c)
-		if err == nil {
-			if i > 0 {
-				log.Printf("postgres connection established on attempt %d/%d", i+1, len(delays))
-			}
-			return conn, nil
-		}
-		lastErr = err
-		log.Printf("postgres connection attempt %d/%d failed: %v", i+1, len(delays), err)
-	}
-	return nil, fmt.Errorf("postgres unreachable after %d attempts: %w", len(delays), lastErr)
 }
 
 func sqliteJournalMode() string {
@@ -1626,9 +1505,6 @@ func IsSQLiteDB(file io.ReaderAt) (bool, error) {
 }
 
 func Checkpoint() error {
-	if IsPostgres() {
-		return nil
-	}
 	return db.Exec("PRAGMA wal_checkpoint(TRUNCATE);").Error
 }
 

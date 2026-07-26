@@ -3,7 +3,6 @@
 interface Window {
   X_UI_BASE_PATH?: string;
   X_UI_CUR_VER?: string;
-  X_UI_DB_TYPE?: string;
 }
 
 declare module 'persian-calendar-suite' {

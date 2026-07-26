@@ -55,20 +55,6 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30
     && echo "cdf411fce977a1f48adb6a3b224e3e2bd7eccfcd4d6e2e30c6dc443f1a0e8e52  /out/bin/geoip.dat" | sha256sum -c - \
     && echo "27c8353b72f5cbde081976ebbfda9bec0dba893448b6b729b1b2b6ba7f74af5e  /out/bin/geosite.dat" | sha256sum -c -
 
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o /out/bin/geoip_IR.dat \
-      https://github.com/Chocolate4U/Iran-v2ray-rules/releases/download/202607260714/geoip.dat \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o /out/bin/geosite_IR.dat \
-      https://github.com/Chocolate4U/Iran-v2ray-rules/releases/download/202607260714/geosite.dat \
-    && echo "ab26a6def89a7001ea7c927d5a97ace429eeaaea476f27c0d2c4f16c31d34add  /out/bin/geoip_IR.dat" | sha256sum -c - \
-    && echo "0d1b3152c8a5cbbfd954956775c0d3497862ba2128731191677e11c7605abe31  /out/bin/geosite_IR.dat" | sha256sum -c -
-
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o /out/bin/geoip_RU.dat \
-      https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/download/202607261102/geoip.dat \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o /out/bin/geosite_RU.dat \
-      https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/download/202607261102/geosite.dat \
-    && echo "9c3ff6a4331fed855ed6b56d7deec0ce2a0a6e626a74c6910ddb2881b7e42bf9  /out/bin/geoip_RU.dat" | sha256sum -c - \
-    && echo "5dd054face5cde77bf42350be2202ebb5170bc66e418922cd5e63c78e6804ea2  /out/bin/geosite_RU.dat" | sha256sum -c -
-
 FROM scratch
 WORKDIR /app
 COPY --from=panel-builder /out/x-ui /app/x-ui

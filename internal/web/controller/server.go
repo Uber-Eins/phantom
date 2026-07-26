@@ -44,9 +44,9 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.GET("/xrayMetricsHistory/:metric/:bucket", a.getXrayMetricsHistoryBucket)
 	g.GET("/xrayObservatory", a.getXrayObservatory)
 	g.GET("/xrayObservatoryHistory/:tag/:bucket", a.getXrayObservatoryHistoryBucket)
+	g.GET("/getXrayVersion", a.getXrayVersion)
 	g.GET("/getConfigJson", a.getConfigJson)
 	g.GET("/getDb", a.getDb)
-	g.GET("/getMigration", a.getMigration)
 	g.GET("/getNewUUID", a.getNewUUID)
 	g.GET("/getNewX25519Cert", a.getNewX25519Cert)
 	g.GET("/getNewmldsa65", a.getNewmldsa65)
@@ -55,6 +55,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 
 	g.POST("/stopXrayService", a.stopXrayService)
 	g.POST("/restartXrayService", a.restartXrayService)
+	g.POST("/installXray/:version", a.installXray)
 	g.POST("/logs/:count", a.getLogs)
 	g.POST("/xraylogs/:count", a.getXrayLogs)
 	g.POST("/importDB", a.importDB)
@@ -166,6 +167,15 @@ func (a *ServerController) getXrayObservatoryHistoryBucket(c *gin.Context) {
 	jsonObj(c, a.xrayMetricsService.AggregateObservatory(tag, bucket, 60), nil)
 }
 
+func (a *ServerController) getXrayVersion(c *gin.Context) {
+	versions, err := a.serverService.GetXrayVersionsCached()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "getVersion"), err)
+		return
+	}
+	jsonObj(c, versions, nil)
+}
+
 // stopXrayService stops the Xray service.
 func (a *ServerController) stopXrayService(c *gin.Context) {
 	err := a.serverService.StopXrayService()
@@ -198,6 +208,16 @@ func (a *ServerController) restartXrayService(c *gin.Context) {
 		"Xray service has been restarted successfully",
 		"success",
 	)
+}
+
+// installXray installs or updates Xray to the specified version.
+func (a *ServerController) installXray(c *gin.Context) {
+	err := a.serverService.UpdateXray(c.Param("version"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.index.xraySwitch"), err)
+		return
+	}
+	jsonMsg(c, I18nWeb(c, "pages.index.xraySwitchVersionPopover"), err)
 }
 
 // getLogs retrieves the in-process application logs based on count and level.
@@ -248,24 +268,6 @@ func (a *ServerController) getDb(c *gin.Context) {
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Disposition", "attachment; filename="+filename)
 	_, _ = c.Writer.Write(db)
-}
-
-// getMigration downloads a cross-engine migration file: a .dump on SQLite or a
-// .db SQLite database on PostgreSQL, so the data can seed the other backend.
-func (a *ServerController) getMigration(c *gin.Context) {
-	data, filename, err := a.serverService.GetMigration()
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.index.getDatabaseError"), err)
-		return
-	}
-	if !filenameRegex.MatchString(filename) {
-		_ = c.AbortWithError(http.StatusBadRequest, fmt.Errorf("invalid filename"))
-		return
-	}
-
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Disposition", "attachment; filename="+filename)
-	_, _ = c.Writer.Write(data)
 }
 
 // importDB imports a database file and restarts the Xray service.

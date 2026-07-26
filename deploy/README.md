@@ -57,6 +57,7 @@ systemctl --user list-timers podman-auto-update.timer
 ```
 
 只有已经保存的 `stable` 镜像版本会被部署。更新失败时，systemd 保留服务失败状态和日志；SQLite 数据不在镜像层中。
+仪表盘中的 Xray Core 版本切换写入当前容器层；镜像更新替换容器后会恢复为镜像内置版本。
 
 ## 备份与恢复
 

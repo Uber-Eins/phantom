@@ -259,6 +259,7 @@ func TestRemovedAPIsAndPublicSubscriptionReturn404(t *testing.T) {
 		"/panel/api/apiTokens",
 		"/panel/api/fail2ban",
 		"/panel/api/inbounds/allLinks",
+		"/panel/api/server/getMigration",
 	} {
 		t.Run(target, func(t *testing.T) {
 			resp, err := client.Get(ts.URL + target)

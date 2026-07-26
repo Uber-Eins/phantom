@@ -5,6 +5,7 @@ import {
   BarsOutlined,
   PoweroffOutlined,
   ReloadOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 
 import type { Status } from '@/models/status';
@@ -19,6 +20,7 @@ interface XrayStatusCardProps {
   onRestartXray: () => void;
   onOpenLogs: () => void;
   onOpenXrayLogs: () => void;
+  onOpenVersionSwitch: () => void;
 }
 
 const XRAY_STATE_KEYS: Record<string, string> = {
@@ -35,6 +37,7 @@ export default function XrayStatusCard({
   onRestartXray,
   onOpenLogs,
   onOpenXrayLogs,
+  onOpenVersionSwitch,
 }: XrayStatusCardProps) {
   const { t } = useTranslation();
 
@@ -101,6 +104,16 @@ export default function XrayStatusCard({
     <Space className="action" key="restart" role="button" tabIndex={0} aria-label={t('pages.index.restartXray')} onClick={onRestartXray} onKeyDown={activateOnKey(onRestartXray)}>
       <ReloadOutlined />
       {!isMobile && <span>{t('pages.index.restartXray')}</span>}
+    </Space>,
+    <Space className="action" key="switch" role="button" tabIndex={0} aria-label={t('pages.index.xraySwitch')} onClick={onOpenVersionSwitch} onKeyDown={activateOnKey(onOpenVersionSwitch)}>
+      <ToolOutlined />
+      {!isMobile && (
+        <span>
+          {status.xray.version && status.xray.version !== 'Unknown'
+            ? `v${status.xray.version}`
+            : t('pages.index.xraySwitch')}
+        </span>
+      )}
     </Space>,
   ];
 

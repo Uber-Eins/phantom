@@ -8,7 +8,6 @@ import {
   genAllLinks,
   genWireguardConfigs,
   genWireguardLinks,
-  isPostQuantumLink,
 } from '@/lib/xray/inbound-link';
 import { inboundFromDb, type DbInboundLike } from '@/lib/xray/inbound-from-db';
 import QrPanel from './QrPanel';
@@ -112,7 +111,7 @@ export default function QrCodeModal({
           value={item.value}
           remark={item.header}
           downloadName={item.downloadName || ''}
-          showQr={item.showQr !== false && !isPostQuantumLink(item.value)}
+          showQr={item.showQr !== false}
         />
       ),
     })),

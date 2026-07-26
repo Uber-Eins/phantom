@@ -15,11 +15,9 @@ import (
 	"mime/multipart"
 	stdnet "net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -133,6 +131,9 @@ type ServerService struct {
 
 	lastStatusMu sync.RWMutex
 	lastStatus   *Status
+
+	versionsCacheMu sync.Mutex
+	versionsCache   *cachedXrayVersions
 }
 
 // allowedHistoryBuckets is the bucket-second whitelist for local time-series
@@ -851,9 +852,6 @@ func (s *ServerService) GetConfigJson() (any, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	if database.IsPostgres() {
-		return s.exportPostgresDB()
-	}
 	// Update by manually trigger a checkpoint operation
 	err := database.Checkpoint()
 	if err != nil {
@@ -879,14 +877,9 @@ func (s *ServerService) GetDb() ([]byte, error) {
 // panel's address and followed by the current date and time
 // (_YYYY-MM-DD_HHMMSS). requestHost is the browser address supplied by the
 // download handler. When it is empty, the configured web domain and then the
-// public IP are used. The extension is .dump on PostgreSQL and .db on SQLite;
-// the base falls back to "x-ui" when no address is known.
+// public IP are used. The base falls back to "x-ui" when no address is known.
 func (s *ServerService) BackupFilename(requestHost string) string {
-	ext := ".db"
-	if database.IsPostgres() {
-		ext = ".dump"
-	}
-	return s.backupHost(requestHost) + backupDateSuffix(time.Now()) + ext
+	return s.backupHost(requestHost) + backupDateSuffix(time.Now()) + ".db"
 }
 
 // backupDateSuffix returns the _YYYY-MM-DD_HHMMSS chronological suffix appended
@@ -952,53 +945,13 @@ func sanitizeBackupHost(host string) string {
 	return out
 }
 
-// GetMigration produces a cross-engine migration file plus its filename: on a
-// SQLite panel it returns a portable .dump (SQL text), and on a PostgreSQL panel
-// it returns a .db SQLite database built from the live data. Either output can
-// then seed a panel running on the other backend.
-func (s *ServerService) GetMigration() ([]byte, string, error) {
-	if database.IsPostgres() {
-		tmp, err := os.CreateTemp("", "x-ui-migration-*.db")
-		if err != nil {
-			return nil, "", err
-		}
-		tmpPath := tmp.Name()
-		tmp.Close()
-		defer os.Remove(tmpPath)
-
-		if err := database.ExportPostgresToSQLite(config.GetDBDSN(), tmpPath); err != nil {
-			return nil, "", err
-		}
-		data, err := os.ReadFile(tmpPath)
-		if err != nil {
-			return nil, "", err
-		}
-		return data, "x-ui.db", nil
-	}
-
-	// SQLite panel: checkpoint so the .db reflects the latest writes, then dump.
-	if err := database.Checkpoint(); err != nil {
-		return nil, "", err
-	}
-	data, err := database.DumpSQLiteToBytes(config.GetDBPath())
-	if err != nil {
-		return nil, "", err
-	}
-	return data, "x-ui.dump", nil
-}
-
 func (s *ServerService) ImportDB(file multipart.File) error {
-	if database.IsPostgres() {
-		return s.importPostgresDB(file)
-	}
 	kind, err := sniffUploadKind(file)
 	if err != nil {
 		return common.NewErrorf("Error reading uploaded file: %v", err)
 	}
 	switch kind {
 	case importKindSQLiteDB, importKindSQLiteDump:
-	case importKindPgDump:
-		return common.NewError("This file is a PostgreSQL backup; it can only be restored on a panel running PostgreSQL")
 	default:
 		return common.NewError("Invalid file: expected a SQLite database (.db) from Back Up or a SQLite migration dump (.dump)")
 	}
@@ -1111,123 +1064,14 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 	return nil
 }
 
-// pgConnEnv turns the configured PostgreSQL DSN into the PG* environment used by
-// pg_dump/pg_restore, keeping the password out of the process argument list.
-func pgConnEnv(dsn string) (env []string, dbname string, err error) {
-	u, err := url.Parse(strings.TrimSpace(dsn))
-	if err != nil {
-		return nil, "", err
-	}
-	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
-		return nil, "", common.NewErrorf("unsupported DSN scheme %q", u.Scheme)
-	}
-	dbname = strings.TrimPrefix(u.Path, "/")
-	if dbname == "" {
-		return nil, "", common.NewError("PostgreSQL DSN is missing a database name")
-	}
-	host := u.Hostname()
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := u.Port()
-	if port == "" {
-		port = "5432"
-	}
-	env = append(os.Environ(), "PGHOST="+host, "PGPORT="+port, "PGDATABASE="+dbname)
-	if user := u.User.Username(); user != "" {
-		env = append(env, "PGUSER="+user)
-	}
-	if pass, ok := u.User.Password(); ok {
-		env = append(env, "PGPASSWORD="+pass)
-	}
-	if sslmode := u.Query().Get("sslmode"); sslmode != "" {
-		env = append(env, "PGSSLMODE="+sslmode)
-	}
-	return env, dbname, nil
-}
-
-func (s *ServerService) exportPostgresDB() ([]byte, error) {
-	bin, err := exec.LookPath("pg_dump")
-	if err != nil {
-		return nil, common.NewError("pg_dump not found on the server; install the postgresql-client package to back up a PostgreSQL database")
-	}
-	env, dbname, err := pgConnEnv(config.GetDBDSN())
-	if err != nil {
-		return nil, common.NewErrorf("invalid PostgreSQL DSN: %v", err)
-	}
-	cmd := exec.CommandContext(context.Background(), bin, "--format=custom", "--no-owner", "--no-privileges", "--dbname", dbname)
-	cmd.Env = env
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, common.NewErrorf("pg_dump failed: %v: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return out.Bytes(), nil
-}
-
-var (
-	pgUnsupportedDumpVersionPattern = regexp.MustCompile(`unsupported version \((\d+\.\d+)\) in file header`)
-	pgToolVersionPattern            = regexp.MustCompile(`\d+(?:\.\d+)+`)
-)
-
-var pgArchiveVersionIntroducedIn = map[string]int{
-	"1.15": 16,
-	"1.16": 17,
-}
-
-// checkPgRestoreCanRead probes the dump with pg_restore --list (reads only the
-// TOC, no database connection) so an unreadable file fails before Xray is stopped.
-func checkPgRestoreCanRead(bin, dumpPath string) error {
-	cmd := exec.CommandContext(context.Background(), bin, "--list", dumpPath)
-	cmd.Stdout = io.Discard
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if cmd.Run() == nil {
-		return nil
-	}
-	return pgRestoreReadFailureError(strings.TrimSpace(stderr.String()), pgRestoreVersion(bin))
-}
-
-func pgRestoreReadFailureError(probeOutput, localVersion string) error {
-	m := pgUnsupportedDumpVersionPattern.FindStringSubmatch(probeOutput)
-	if m == nil {
-		return common.NewErrorf("pg_restore cannot read this dump file: %s", probeOutput)
-	}
-	if localVersion == "" {
-		localVersion = "unknown"
-	}
-	if major, known := pgArchiveVersionIntroducedIn[m[1]]; known {
-		return common.NewErrorf("This backup was created by pg_dump from PostgreSQL %d or newer, but pg_restore version %s cannot read it; provide postgresql-client %d or newer in the runtime environment, then retry the import", major, localVersion, major)
-	}
-	return common.NewErrorf("This backup was created by a newer pg_dump than the server's pg_restore (version %s) can read; upgrade the postgresql-client package and retry the import", localVersion)
-}
-
-func pgRestoreVersion(bin string) string {
-	out, err := exec.CommandContext(context.Background(), bin, "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return parsePgToolVersion(string(out))
-}
-
-func parsePgToolVersion(versionOutput string) string {
-	return pgToolVersionPattern.FindString(versionOutput)
-}
-
 const (
 	importKindUnknown = iota
-	importKindPgDump
 	importKindSQLiteDB
 	importKindSQLiteDump
 )
 
-// sniffImportKind classifies an uploaded restore file by its leading bytes:
-// a pg_dump custom archive, a raw SQLite database, or a SQLite SQL text dump.
+// sniffImportKind classifies a raw SQLite database or SQLite SQL text dump.
 func sniffImportKind(header []byte) int {
-	if bytes.HasPrefix(header, []byte("PGDMP")) {
-		return importKindPgDump
-	}
 	if bytes.HasPrefix(header, []byte("SQLite format 3\x00")) {
 		return importKindSQLiteDB
 	}
@@ -1248,155 +1092,6 @@ func sniffUploadKind(file multipart.File) (int, error) {
 		return importKindUnknown, err
 	}
 	return sniffImportKind(header[:n]), nil
-}
-
-func (s *ServerService) importPostgresDB(file multipart.File) error {
-	kind, err := sniffUploadKind(file)
-	if err != nil {
-		return common.NewErrorf("Error reading uploaded file: %v", err)
-	}
-	switch kind {
-	case importKindPgDump:
-		return s.restorePostgresDump(file)
-	case importKindSQLiteDB:
-		return s.migrateSQLiteIntoPostgres(file, false)
-	case importKindSQLiteDump:
-		return s.migrateSQLiteIntoPostgres(file, true)
-	default:
-		return common.NewError("Invalid file: expected a PostgreSQL custom-format dump (.dump) from this panel's Back Up, a SQLite database (.db), or a SQLite migration dump")
-	}
-}
-
-func (s *ServerService) restorePostgresDump(file multipart.File) error {
-	bin, err := exec.LookPath("pg_restore")
-	if err != nil {
-		return common.NewError("pg_restore not found on the server; install the postgresql-client package to restore a PostgreSQL database")
-	}
-	env, dbname, err := pgConnEnv(config.GetDBDSN())
-	if err != nil {
-		return common.NewErrorf("invalid PostgreSQL DSN: %v", err)
-	}
-
-	tempFile, err := os.CreateTemp("", "x-ui-pg-restore-*.dump")
-	if err != nil {
-		return common.NewErrorf("Error creating temporary dump file: %v", err)
-	}
-	tempPath := tempFile.Name()
-	defer os.Remove(tempPath)
-	if _, err := io.Copy(tempFile, file); err != nil {
-		tempFile.Close()
-		return common.NewErrorf("Error saving dump: %v", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return common.NewErrorf("Error closing temporary dump file: %v", err)
-	}
-
-	if err := checkPgRestoreCanRead(bin, tempPath); err != nil {
-		return err
-	}
-
-	xrayStopped := true
-	defer func() {
-		if xrayStopped {
-			if errR := s.RestartXrayService(); errR != nil {
-				logger.Warningf("Failed to restart Xray after DB restore error: %v", errR)
-			}
-		}
-	}()
-	if errStop := s.StopXrayService(); errStop != nil {
-		logger.Warningf("Failed to stop Xray before DB restore: %v", errStop)
-	}
-
-	if errClose := database.CloseDB(); errClose != nil {
-		logger.Warningf("Failed to close existing DB before restore: %v", errClose)
-	}
-
-	cmd := exec.CommandContext(context.Background(), bin,
-		"--clean", "--if-exists", "--no-owner", "--no-privileges",
-		"--single-transaction", "--dbname", dbname, tempPath,
-	)
-	cmd.Env = env
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	runErr := cmd.Run()
-
-	if errInit := database.InitDB(config.GetDBPath()); errInit != nil {
-		return common.NewErrorf("Restore finished but reopening the database failed: %v", errInit)
-	}
-	s.inboundService.MigrateDB()
-
-	if runErr != nil {
-		return common.NewErrorf("pg_restore failed (database left unchanged): %v: %s", runErr, strings.TrimSpace(stderr.String()))
-	}
-
-	xrayStopped = false
-	if err := s.RestartXrayService(); err != nil {
-		return common.NewErrorf("Restored DB but failed to start Xray: %v", err)
-	}
-	return nil
-}
-
-func (s *ServerService) migrateSQLiteIntoPostgres(file multipart.File, isSQLDump bool) error {
-	tempDir, err := os.MkdirTemp("", "x-ui-pg-migrate-*")
-	if err != nil {
-		return common.NewErrorf("Error creating temporary folder: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	uploadPath := filepath.Join(tempDir, "upload.db")
-	if isSQLDump {
-		uploadPath = filepath.Join(tempDir, "upload.dump")
-	}
-	if err := saveUploadedFile(file, uploadPath); err != nil {
-		return common.NewErrorf("Error saving uploaded file: %v", err)
-	}
-
-	dbPath := uploadPath
-	if isSQLDump {
-		dbPath = filepath.Join(tempDir, "restored.db")
-		if err := database.RestoreSQLite(uploadPath, dbPath); err != nil {
-			return common.NewErrorf("Error rebuilding a SQLite database from the migration dump: %v", err)
-		}
-	}
-	if err := database.ValidateSQLiteDB(dbPath); err != nil {
-		return common.NewErrorf("Invalid or corrupt db file: %v", err)
-	}
-	if err := database.PrepareSQLiteForMigration(dbPath); err != nil {
-		return common.NewErrorf("This file cannot be imported: %v", err)
-	}
-
-	xrayStopped := true
-	defer func() {
-		if xrayStopped {
-			if errR := s.RestartXrayService(); errR != nil {
-				logger.Warningf("Failed to restart Xray after DB restore error: %v", errR)
-			}
-		}
-	}()
-	if errStop := s.StopXrayService(); errStop != nil {
-		logger.Warningf("Failed to stop Xray before DB restore: %v", errStop)
-	}
-
-	if errClose := database.CloseDB(); errClose != nil {
-		logger.Warningf("Failed to close existing DB before restore: %v", errClose)
-	}
-
-	migrateErr := database.MigrateData(dbPath, config.GetDBDSN())
-
-	if errInit := database.InitDB(config.GetDBPath()); errInit != nil {
-		return common.NewErrorf("Restore finished but reopening the database failed: %v", errInit)
-	}
-	s.inboundService.MigrateDB()
-
-	if migrateErr != nil {
-		return common.NewErrorf("Importing the SQLite data into PostgreSQL failed: %v; the import runs in a single transaction, so the database was left unchanged", migrateErr)
-	}
-
-	xrayStopped = false
-	if err := s.RestartXrayService(); err != nil {
-		return common.NewErrorf("Restored DB but failed to start Xray: %v", err)
-	}
-	return nil
 }
 
 func saveUploadedFile(file multipart.File, dstPath string) error {

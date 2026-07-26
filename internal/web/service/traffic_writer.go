@@ -115,10 +115,8 @@ func runTrafficWriter(ctx context.Context, queue chan *trafficWriteRequest, done
 // runSerializedTx runs fn inside one DB transaction on the shared serial
 // traffic-writer goroutine, so it can never execute concurrently with the
 // @every 5s traffic poll (AddTraffic). Both touch the hot client_traffics and
-// inbounds rows, and they acquire them in opposite order (the poll locks
-// inbounds then client_traffics; an admin client/inbound mutation does the
-// reverse), which Postgres aborts as a deadlock (SQLSTATE 40P01). Routing every
-// such mutation through this single writer removes that contention entirely.
+// inbounds rows; routing every mutation through this writer prevents lock
+// contention and inconsistent counter updates.
 //
 // Keep runtime I/O out of fn so traffic accounting never waits while the local
 // Xray process is being reconfigured. Apply runtime changes after this returns.

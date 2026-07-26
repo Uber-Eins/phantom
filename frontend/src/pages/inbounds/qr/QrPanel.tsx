@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, QRCode, Tag, Tooltip, message } from 'antd';
 import { CopyOutlined, DownloadOutlined, PictureOutlined } from '@ant-design/icons';
 
+import { canEncodeQrCode } from '@/lib/qr-code';
 import { ClipboardManager, FileManager } from '@/utils';
 import { activateOnKey } from '@/utils/a11y';
 import './QrPanel.css';
@@ -62,6 +63,7 @@ export default function QrPanel({
   const { t } = useTranslation();
   const [messageApi, messageContextHolder] = message.useMessage();
   const qrRef = useRef<HTMLDivElement | null>(null);
+  const canRenderQr = showQr && canEncodeQrCode(value);
 
   async function copy() {
     const ok = await ClipboardManager.copyText(value);
@@ -99,7 +101,7 @@ export default function QrPanel({
         <Tooltip title={t('copy')}>
           <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={copy} />
         </Tooltip>
-        {showQr && (
+        {canRenderQr && (
           <Tooltip title={t('downloadImage')}>
             <Button size="small" icon={<PictureOutlined />} aria-label={t('downloadImage')} onClick={downloadImage} />
           </Tooltip>
@@ -110,7 +112,7 @@ export default function QrPanel({
           </Tooltip>
         )}
       </div>
-      {showQr && (
+      {canRenderQr && (
         <div
           ref={qrRef}
           className="qr-panel-canvas"
@@ -127,6 +129,7 @@ export default function QrPanel({
               size={size}
               type="svg"
               bordered={false}
+              errorLevel="L"
               color="#000000"
               bgColor="#ffffff"
             />

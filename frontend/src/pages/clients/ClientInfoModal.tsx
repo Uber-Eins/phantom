@@ -7,7 +7,7 @@ import { ClipboardManager, HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
-import { isPostQuantumLink } from '@/lib/xray/inbound-link';
+import { canEncodeQrCode } from '@/lib/qr-code';
 import { LinkTags, linkMetaText, parseLinkParts } from '@/lib/xray/link-label';
 import { QrPanel } from '@/pages/inbounds/qr';
 import ConfigBlock from '@/components/clients/ConfigBlock';
@@ -280,7 +280,7 @@ export default function ClientInfoModal({
                   const fallback = `${t('pages.clients.link')} ${idx + 1}`;
                   const rowTitle = (parts && linkMetaText(parts)) || fallback;
                   const qrRemark = parts?.remark || rowTitle;
-                  const canQr = !isPostQuantumLink(link);
+                  const canQr = canEncodeQrCode(link);
                   return (
                     <div key={idx} className="link-row">
                       {parts

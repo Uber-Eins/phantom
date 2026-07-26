@@ -53,6 +53,7 @@ const BackupModal = lazy(() => import('./BackupModal'));
 const SystemHistoryModal = lazy(() => import('./SystemHistoryModal'));
 const XrayMetricsModal = lazy(() => import('./XrayMetricsModal'));
 const XrayLogModal = lazy(() => import('./XrayLogModal'));
+const VersionModal = lazy(() => import('./VersionModal'));
 import './IndexPage.css';
 
 export default function IndexPage() {
@@ -65,14 +66,13 @@ export default function IndexPage() {
 
   const [accessLogEnable, setAccessLogEnable] = useState(false);
 
-  const basePath = window.X_UI_BASE_PATH || '';
-
   const [showIp, setShowIp] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [sysHistoryOpen, setSysHistoryOpen] = useState(false);
   const [xrayMetricsOpen, setXrayMetricsOpen] = useState(false);
   const [xrayLogsOpen, setXrayLogsOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
   const [configText, setConfigText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -169,6 +169,7 @@ export default function IndexPage() {
                       onRestartXray={restartXray}
                       onOpenXrayLogs={() => setXrayLogsOpen(true)}
                       onOpenLogs={() => setLogsOpen(true)}
+                      onOpenVersionSwitch={() => setVersionOpen(true)}
                     />
                   </Col>
 
@@ -413,7 +414,6 @@ export default function IndexPage() {
         <LazyMount when={backupOpen}>
           <BackupModal
             open={backupOpen}
-            basePath={basePath}
             onClose={() => setBackupOpen(false)}
             onBusy={setBusy}
           />
@@ -430,6 +430,14 @@ export default function IndexPage() {
         </LazyMount>
         <LazyMount when={xrayLogsOpen}>
           <XrayLogModal open={xrayLogsOpen} onClose={() => setXrayLogsOpen(false)} />
+        </LazyMount>
+        <LazyMount when={versionOpen}>
+          <VersionModal
+            open={versionOpen}
+            status={status}
+            onClose={() => setVersionOpen(false)}
+            onBusy={setBusy}
+          />
         </LazyMount>
 
         <LazyMount when={configTextOpen}>
