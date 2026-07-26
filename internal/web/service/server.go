@@ -1,7 +1,6 @@
 package service
 
 import (
-	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -22,7 +21,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,7 +87,6 @@ type Status struct {
 		Version  string       `json:"version"`
 	} `json:"xray"`
 	PanelVersion string    `json:"panelVersion"`
-	PanelGuid    string    `json:"panelGuid"`
 	Uptime       uint64    `json:"uptime"`
 	Loads        []float64 `json:"loads"`
 	TcpCount     int       `json:"tcpCount"`
@@ -117,14 +114,6 @@ type Status struct {
 	} `json:"appStats"`
 }
 
-// Release represents information about a software release from GitHub.
-type Release struct {
-	TagName         string `json:"tag_name"`         // The tag name of the release
-	Body            string `json:"body"`             // The release notes; the dev channel reads its commit from here
-	TargetCommitish string `json:"target_commitish"` // The branch/commit the tag points at
-	Prerelease      bool   `json:"prerelease"`       // Whether this is a pre-release
-}
-
 // ServerService provides business logic for server monitoring and management.
 // It handles system status collection, IP detection, and application statistics.
 type ServerService struct {
@@ -144,27 +133,10 @@ type ServerService struct {
 
 	lastStatusMu sync.RWMutex
 	lastStatus   *Status
-
-	versionsCacheMu sync.Mutex
-	versionsCache   *cachedXrayVersions
-
-	fail2banMu        sync.Mutex
-	fail2banInstalled bool
-	fail2banCheckedAt time.Time
 }
 
-type cachedXrayVersions struct {
-	versions  []string
-	fetchedAt time.Time
-}
-
-// xrayVersionsCacheTTL bounds how often /getXrayVersion hits GitHub. The list
-// is purely informational (rendered in the "switch Xray version" picker) so a
-// quarter-hour staleness window is fine and saves the API budget.
-const xrayVersionsCacheTTL = 15 * time.Minute
-
-// allowedHistoryBuckets is the bucket-second whitelist for time-series
-// aggregation endpoints (server + node metrics). Restricting it prevents
+// allowedHistoryBuckets is the bucket-second whitelist for local time-series
+// aggregation endpoints. Restricting it prevents
 // callers from triggering arbitrary aggregation work and keeps the
 // frontend's bucket selector self-documenting.
 var allowedHistoryBuckets = map[int]bool{
@@ -180,8 +152,8 @@ var allowedHistoryBuckets = map[int]bool{
 }
 
 // IsAllowedHistoryBucket reports whether a bucket-seconds value is in the
-// whitelist used by /server/history, /server/cpuHistory, /server/xrayMetricsHistory,
-// /server/xrayObservatoryHistory, and /nodes/history.
+// whitelist used by /server/history, /server/cpuHistory,
+// /server/xrayMetricsHistory, and /server/xrayObservatoryHistory.
 func IsAllowedHistoryBucket(bucketSeconds int) bool {
 	return allowedHistoryBuckets[bucketSeconds]
 }
@@ -192,53 +164,6 @@ func (s *ServerService) LastStatus() *Status {
 	s.lastStatusMu.RLock()
 	defer s.lastStatusMu.RUnlock()
 	return s.lastStatus
-}
-
-// Fail2banStatus tells the frontend whether the per-client IP limit can
-// actually be enforced. Enforcement depends on fail2ban, so a limit set
-// without it would silently do nothing.
-type Fail2banStatus struct {
-	Enabled   bool `json:"enabled"`
-	Installed bool `json:"installed"`
-	Usable    bool `json:"usable"`
-	Windows   bool `json:"windows"`
-}
-
-const fail2banInstalledCacheTTL = 30 * time.Second
-
-func (s *ServerService) GetFail2banStatus() Fail2banStatus {
-	enabled := isFail2banEnabled()
-
-	installed := false
-	if enabled {
-		installed = s.isFail2banInstalled()
-	}
-
-	return Fail2banStatus{
-		Enabled:   enabled,
-		Installed: installed,
-		Usable:    enabled && installed,
-		Windows:   runtime.GOOS == "windows",
-	}
-}
-
-func isFail2banEnabled() bool {
-	value, ok := os.LookupEnv("XUI_ENABLE_FAIL2BAN")
-	return !ok || value == "true"
-}
-
-func (s *ServerService) isFail2banInstalled() bool {
-	s.fail2banMu.Lock()
-	defer s.fail2banMu.Unlock()
-
-	if !s.fail2banCheckedAt.IsZero() && time.Since(s.fail2banCheckedAt) < fail2banInstalledCacheTTL {
-		return s.fail2banInstalled
-	}
-
-	err := exec.CommandContext(context.Background(), "fail2ban-client", "-h").Run()
-	s.fail2banInstalled = err == nil
-	s.fail2banCheckedAt = time.Now()
-	return s.fail2banInstalled
 }
 
 // RefreshStatus collects a new system snapshot, stores it as LastStatus, and
@@ -255,31 +180,6 @@ func (s *ServerService) RefreshStatus() *Status {
 	s.lastStatusMu.Unlock()
 	s.AppendStatusSample(time.Now(), next)
 	return next
-}
-
-// GetXrayVersionsCached wraps GetXrayVersions with a TTL cache. On fetch
-// failure we serve the last successful list (if any) so the UI doesn't go
-// blank during a GitHub API hiccup; if there's no cache at all the underlying
-// error is surfaced.
-func (s *ServerService) GetXrayVersionsCached() ([]string, error) {
-	s.versionsCacheMu.Lock()
-	cache := s.versionsCache
-	s.versionsCacheMu.Unlock()
-	if cache != nil && time.Since(cache.fetchedAt) <= xrayVersionsCacheTTL {
-		return cache.versions, nil
-	}
-	versions, err := s.GetXrayVersions()
-	if err != nil {
-		if cache != nil {
-			logger.Warning("GetXrayVersionsCached: serving stale list:", err)
-			return cache.versions, nil
-		}
-		return nil, err
-	}
-	s.versionsCacheMu.Lock()
-	s.versionsCache = &cachedXrayVersions{versions: versions, fetchedAt: time.Now()}
-	s.versionsCacheMu.Unlock()
-	return versions, nil
 }
 
 // GetDefaultLogOutboundTags scans the default Xray config for freedom and
@@ -611,10 +511,6 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	}
 	status.Xray.Version = s.xrayService.GetXrayVersion()
 	status.PanelVersion = config.GetPanelVersion()
-	if guid, err := s.settingService.GetPanelGuid(); err == nil {
-		status.PanelGuid = guid
-	}
-
 	// Application stats
 	if rss := sys.SelfRSS(); rss > 0 {
 		status.AppStats.Mem = rss
@@ -764,75 +660,6 @@ func (s *ServerService) sampleCPUUtilization() (float64, error) {
 	return s.emaCPU, nil
 }
 
-const (
-	maxXrayArchiveBytes = 200 << 20
-	maxXrayBinaryBytes  = 200 << 20
-	// maxXrayDigestBytes caps the .dgst checksum sidecar read; it is a few
-	// hundred bytes in practice.
-	maxXrayDigestBytes = 64 << 10
-)
-
-func (s *ServerService) GetXrayVersions() ([]string, error) {
-	const (
-		XrayURL    = "https://api.github.com/repos/XTLS/Xray-core/releases"
-		bufferSize = 8192
-	)
-
-	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, XrayURL, nil)
-	if reqErr != nil {
-		return nil, reqErr
-	}
-	resp, err := s.settingService.NewProxiedHTTPClient(10 * time.Second).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Check HTTP status code - GitHub API returns object instead of array on error
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		var errorResponse struct {
-			Message string `json:"message"`
-		}
-		if json.Unmarshal(bodyBytes, &errorResponse) == nil && errorResponse.Message != "" {
-			return nil, fmt.Errorf("GitHub API error: %s", errorResponse.Message)
-		}
-		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, resp.Status)
-	}
-
-	buffer := bytes.NewBuffer(make([]byte, bufferSize))
-	buffer.Reset()
-	if _, err := buffer.ReadFrom(resp.Body); err != nil {
-		return nil, err
-	}
-
-	var releases []Release
-	if err := json.Unmarshal(buffer.Bytes(), &releases); err != nil {
-		return nil, err
-	}
-
-	var versions []string
-	for _, release := range releases {
-		tagVersion := strings.TrimPrefix(release.TagName, "v")
-		tagParts := strings.Split(tagVersion, ".")
-		if len(tagParts) != 3 {
-			continue
-		}
-
-		major, err1 := strconv.Atoi(tagParts[0])
-		minor, err2 := strconv.Atoi(tagParts[1])
-		patch, err3 := strconv.Atoi(tagParts[2])
-		if err1 != nil || err2 != nil || err3 != nil {
-			continue
-		}
-
-		if major > 26 || (major == 26 && minor > 6) || (major == 26 && minor == 6 && patch >= 27) {
-			versions = append(versions, release.TagName)
-		}
-	}
-	return versions, nil
-}
-
 func (s *ServerService) StopXrayService() error {
 	err := s.xrayService.StopXray()
 	if err != nil {
@@ -851,285 +678,9 @@ func (s *ServerService) RestartXrayService() error {
 	return nil
 }
 
-func (s *ServerService) downloadXRay(version string) (string, error) {
-	osName := runtime.GOOS
-	arch := runtime.GOARCH
-
-	switch osName {
-	case "darwin":
-		osName = "macos"
-	case "windows":
-		osName = "windows"
-	}
-
-	switch arch {
-	case "amd64":
-		arch = "64"
-	case "arm64":
-		arch = "arm64-v8a"
-	case "armv7":
-		arch = "arm32-v7a"
-	case "armv6":
-		arch = "arm32-v6"
-	case "armv5":
-		arch = "arm32-v5"
-	case "386":
-		arch = "32"
-	case "s390x":
-		arch = "s390x"
-	}
-
-	fileName := fmt.Sprintf("Xray-%s-%s.zip", osName, arch)
-	url := fmt.Sprintf("https://github.com/XTLS/Xray-core/releases/download/%s/%s", version, fileName)
-	client := s.settingService.NewProxiedHTTPClient(60 * time.Second)
-	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-	if reqErr != nil {
-		return "", reqErr
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download xray: unexpected HTTP %d", resp.StatusCode)
-	}
-	if resp.ContentLength > maxXrayArchiveBytes {
-		return "", fmt.Errorf("download xray: archive exceeds %d bytes", maxXrayArchiveBytes)
-	}
-
-	file, err := os.CreateTemp("", "xray-*.zip")
-	if err != nil {
-		return "", err
-	}
-	path := file.Name()
-	ok := false
-	defer func() {
-		_ = file.Close()
-		if !ok {
-			_ = os.Remove(path)
-		}
-	}()
-
-	n, err := io.Copy(file, io.LimitReader(resp.Body, maxXrayArchiveBytes+1))
-	if err != nil {
-		return "", err
-	}
-	if n > maxXrayArchiveBytes {
-		return "", fmt.Errorf("download xray: archive exceeds %d bytes", maxXrayArchiveBytes)
-	}
-
-	// Verify the archive against the SHA2-256 published in the release's .dgst
-	// sidecar before installing it. TLS protects the transport, not the artifact;
-	// a corrupted or tampered asset must not be installed and run as xray.
-	want, err := s.fetchXrayDigestSHA256(client, url+".dgst")
-	if err != nil {
-		return "", err
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", err
-	}
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
-	}
-	if got := hex.EncodeToString(hasher.Sum(nil)); !strings.EqualFold(got, want) {
-		// User-facing warning: the archive's SHA-256 does not match the official
-		// release checksum, so the download is corrupted or has been tampered
-		// with. Abort the install so a bad binary is never run, and tell the user
-		// to retry/re-download rather than proceed with a mismatched image.
-		return "", fmt.Errorf("Xray update aborted: the downloaded archive does not match the official SHA-256 checksum, so the image is corrupted or differs from the official release. Please exit and re-download the official image, then try again (expected %s, got %s)", want, got)
-	}
-
-	ok = true
-	return path, nil
-}
-
-// fetchXrayDigestSHA256 downloads the .dgst sidecar XTLS publishes next to each
-// release asset and returns the SHA2-256 hex digest it lists.
-func (s *ServerService) fetchXrayDigestSHA256(client *http.Client, dgstURL string) (string, error) {
-	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, dgstURL, nil)
-	if reqErr != nil {
-		return "", fmt.Errorf("download xray checksum: %w", reqErr)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download xray checksum: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download xray checksum: unexpected HTTP %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxXrayDigestBytes))
-	if err != nil {
-		return "", fmt.Errorf("download xray checksum: %w", err)
-	}
-	return parseXrayDigestSHA256(raw)
-}
-
-// parseXrayDigestSHA256 extracts the lowercase SHA2-256 hex from an XTLS .dgst
-// file, whose lines are "ALGO= <hex>" (the relevant one being "SHA2-256= ...").
-func parseXrayDigestSHA256(dgst []byte) (string, error) {
-	for line := range strings.SplitSeq(string(dgst), "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "SHA2-256=")
-		if !ok {
-			continue
-		}
-		h := strings.ToLower(strings.TrimSpace(rest))
-		if len(h) != 64 {
-			return "", fmt.Errorf("xray checksum: malformed SHA2-256 entry in digest")
-		}
-		return h, nil
-	}
-	return "", fmt.Errorf("xray checksum: no SHA2-256 entry in digest")
-}
-
-func (s *ServerService) UpdateXray(version string) error {
-	versions, err := s.GetXrayVersions()
-	if err != nil {
-		return err
-	}
-	if !slices.Contains(versions, version) {
-		return fmt.Errorf("xray version %q is not in the fetched release list", version)
-	}
-
-	// 1. Stop xray before doing anything
-	if err := s.StopXrayService(); err != nil {
-		logger.Warning("failed to stop xray before update:", err)
-	}
-
-	// 2. Download the zip
-	zipFileName, err := s.downloadXRay(version)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(zipFileName)
-
-	zipFile, err := os.Open(zipFileName)
-	if err != nil {
-		return err
-	}
-	defer zipFile.Close()
-
-	stat, err := zipFile.Stat()
-	if err != nil {
-		return err
-	}
-	reader, err := zip.NewReader(zipFile, stat.Size())
-	if err != nil {
-		return err
-	}
-
-	// 3. Helper to extract files
-	copyZipFile := func(zipName string, fileName string) error {
-		zipFile, err := reader.Open(zipName)
-		if err != nil {
-			return err
-		}
-		defer zipFile.Close()
-		if err := os.MkdirAll(filepath.Dir(fileName), 0o755); err != nil {
-			return err
-		}
-		tmpFile, err := os.CreateTemp(filepath.Dir(fileName), ".xray-*")
-		if err != nil {
-			return err
-		}
-		tmpPath := tmpFile.Name()
-		ok := false
-		defer func() {
-			_ = tmpFile.Close()
-			if !ok {
-				_ = os.Remove(tmpPath)
-			}
-		}()
-		n, err := io.Copy(tmpFile, io.LimitReader(zipFile, maxXrayBinaryBytes+1))
-		if err != nil {
-			return err
-		}
-		if n > maxXrayBinaryBytes {
-			return fmt.Errorf("xray binary exceeds %d bytes", maxXrayBinaryBytes)
-		}
-		if err := tmpFile.Chmod(0o755); err != nil {
-			return err
-		}
-		if err := tmpFile.Close(); err != nil {
-			return err
-		}
-		if runtime.GOOS == "windows" {
-			_ = os.Remove(fileName)
-		}
-		if err := os.Rename(tmpPath, fileName); err != nil {
-			return err
-		}
-		ok = true
-		return nil
-	}
-
-	// 4. Extract correct binary
-	if runtime.GOOS == "windows" {
-		targetBinary := filepath.Join(config.GetBinFolderPath(), "xray-windows-amd64.exe")
-		err = copyZipFile("xray.exe", targetBinary)
-	} else {
-		err = copyZipFile("xray", xray.GetBinaryPath())
-	}
-	if err != nil {
-		return err
-	}
-
-	// 5. Restart xray
-	if err := s.xrayService.RestartXray(true); err != nil {
-		logger.Error("start xray failed:", err)
-		return err
-	}
-
-	return nil
-}
-
-func (s *ServerService) GetLogs(count string, level string, syslog string) []string {
+func (s *ServerService) GetLogs(count string, level string) []string {
 	c, _ := strconv.Atoi(count)
-	var lines []string
-
-	if syslog == "true" {
-		// Check if running on Windows - journalctl is not available
-		if runtime.GOOS == "windows" {
-			return []string{"Syslog is not supported on Windows. Please use application logs instead by unchecking the 'Syslog' option."}
-		}
-
-		// Validate and sanitize count parameter
-		countInt, err := strconv.Atoi(count)
-		if err != nil || countInt < 1 || countInt > 10000 {
-			return []string{"Invalid count parameter - must be a number between 1 and 10000"}
-		}
-
-		// Validate level parameter - only allow valid syslog levels
-		validLevels := map[string]bool{
-			"0": true, "emerg": true,
-			"1": true, "alert": true,
-			"2": true, "crit": true,
-			"3": true, "err": true,
-			"4": true, "warning": true,
-			"5": true, "notice": true,
-			"6": true, "info": true,
-			"7": true, "debug": true,
-		}
-		if !validLevels[level] {
-			return []string{"Invalid level parameter - must be a valid syslog level"}
-		}
-
-		// Use hardcoded command with validated parameters
-		cmd := exec.CommandContext(context.Background(), "journalctl", "-u", "x-ui", "--no-pager", "-n", strconv.Itoa(countInt), "-p", level)
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		err = cmd.Run()
-		if err != nil {
-			return []string{"Failed to run journalctl command! Make sure systemd is available and x-ui service is registered."}
-		}
-		lines = strings.Split(out.String(), "\n")
-	} else {
-		lines = logger.GetLogs(c, level)
-	}
-
-	return lines
+	return logger.GetLogs(c, level)
 }
 
 // parseAccessLogFields extracts the structured fields from one Xray access-log
@@ -1325,16 +876,11 @@ func (s *ServerService) GetDb() ([]byte, error) {
 }
 
 // BackupFilename returns the filename for a database backup, named after the
-// panel's address so a downloaded or Telegram-sent backup identifies the server
-// it came from, followed by the current date and time (_YYYY-MM-DD_HHMMSS) so
-// files accumulated in Telegram chat history group by server then sort
-// chronologically and same-day backups stay distinct. requestHost is the
-// browser's address: the getDb handler passes c.Request.Host so a panel download
-// is named after whatever address the user reached the panel with, no Listen
-// Domain needed. The Telegram bot has no request and passes "", falling back to
-// the configured Listen Domain (webDomain) and then the public IP. The extension
-// is .dump on PostgreSQL and .db on SQLite; the base falls back to "x-ui" when
-// no address is known.
+// panel's address and followed by the current date and time
+// (_YYYY-MM-DD_HHMMSS). requestHost is the browser address supplied by the
+// download handler. When it is empty, the configured web domain and then the
+// public IP are used. The extension is .dump on PostgreSQL and .db on SQLite;
+// the base falls back to "x-ui" when no address is known.
 func (s *ServerService) BackupFilename(requestHost string) string {
 	ext := ".db"
 	if database.IsPostgres() {
@@ -1345,18 +891,27 @@ func (s *ServerService) BackupFilename(requestHost string) string {
 
 // backupDateSuffix returns the _YYYY-MM-DD_HHMMSS chronological suffix appended
 // after the host in backup filenames. Uses server-local time for consistency
-// with the timestamp printed in the Telegram backup message body.
+// with other timestamps shown by the panel.
 func backupDateSuffix(now time.Time) string {
 	return "_" + now.Format("2006-01-02_150405")
+}
+
+func extractHostname(value string) string {
+	if value == "" {
+		return ""
+	}
+	if host, _, err := stdnet.SplitHostPort(value); err == nil {
+		return host
+	}
+	return strings.Trim(value, "[]")
 }
 
 // backupHost picks the address used to name backup files: the browser's request
 // host (port stripped) when available, otherwise the configured Listen Domain
 // (webDomain) and then the resolved public IP (IPv4 before IPv6), reduced to safe
-// filename characters. The public IP is resolved directly rather than read from
-// LastStatus so callers whose ServerService never runs the status ticker —
-// notably the Telegram bot — still get a real address instead of the "x-ui"
-// fallback.
+// filename characters. The public IP is resolved directly rather than read
+// from LastStatus so a backup requested before the status ticker runs still
+// gets a real address instead of the "x-ui" fallback.
 func (s *ServerService) backupHost(requestHost string) string {
 	host := extractHostname(strings.TrimSpace(requestHost))
 	if host == "" {
@@ -1643,7 +1198,7 @@ func pgRestoreReadFailureError(probeOutput, localVersion string) error {
 		localVersion = "unknown"
 	}
 	if major, known := pgArchiveVersionIntroducedIn[m[1]]; known {
-		return common.NewErrorf("This backup was created by pg_dump from PostgreSQL %d or newer, but the server's pg_restore is version %s and cannot read it; run 'x-ui pgclient %d' on the server (or upgrade the postgresql-client package to version %d or newer), then retry the import", major, localVersion, major, major)
+		return common.NewErrorf("This backup was created by pg_dump from PostgreSQL %d or newer, but pg_restore version %s cannot read it; provide postgresql-client %d or newer in the runtime environment, then retry the import", major, localVersion, major)
 	}
 	return common.NewErrorf("This backup was created by a newer pg_dump than the server's pg_restore (version %s) can read; upgrade the postgresql-client package and retry the import", localVersion)
 }
@@ -1871,155 +1426,6 @@ func stageSQLiteUpload(file multipart.File, kind int, tempPath string) error {
 	if err := saveUploadedFile(file, tempPath); err != nil {
 		return common.NewErrorf("Error saving db: %v", err)
 	}
-	return nil
-}
-
-// IsValidGeofileName validates that the filename is safe for geofile operations.
-// It checks for path traversal attempts and ensures the filename contains only safe characters.
-func (s *ServerService) IsValidGeofileName(filename string) bool {
-	if filename == "" {
-		return false
-	}
-
-	// Check for path traversal attempts
-	if strings.Contains(filename, "..") {
-		return false
-	}
-
-	// Check for path separators (both forward and backward slash)
-	if strings.ContainsAny(filename, `/\`) {
-		return false
-	}
-
-	// Check for absolute path indicators
-	if filepath.IsAbs(filename) {
-		return false
-	}
-
-	// Additional security: only allow alphanumeric, dots, underscores, and hyphens
-	// This is stricter than the general filename regex
-	validGeofilePattern := `^[a-zA-Z0-9._-]+\.dat$`
-	matched, _ := regexp.MatchString(validGeofilePattern, filename)
-	return matched
-}
-
-func (s *ServerService) UpdateGeofile(fileName string) error {
-	type geofileEntry struct {
-		URL      string
-		FileName string
-	}
-	geofileAllowlist := map[string]geofileEntry{
-		"geoip.dat":      {"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat", "geoip.dat"},
-		"geosite.dat":    {"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat", "geosite.dat"},
-		"geoip_IR.dat":   {"https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geoip.dat", "geoip_IR.dat"},
-		"geosite_IR.dat": {"https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat", "geosite_IR.dat"},
-		"geoip_RU.dat":   {"https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat", "geoip_RU.dat"},
-		"geosite_RU.dat": {"https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat", "geosite_RU.dat"},
-	}
-
-	// Strict allowlist check to avoid writing uncontrolled files
-	if fileName != "" {
-		if _, ok := geofileAllowlist[fileName]; !ok {
-			return common.NewErrorf("Invalid geofile name: %q not in allowlist", fileName)
-		}
-	}
-
-	client := s.settingService.NewProxiedHTTPClient(0)
-
-	downloadFile := func(url, destPath string) error {
-		var req *http.Request
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-		if err != nil {
-			return common.NewErrorf("Failed to create HTTP request for %s: %v", url, err)
-		}
-
-		var localFileModTime time.Time
-		if fileInfo, err := os.Stat(destPath); err == nil {
-			localFileModTime = fileInfo.ModTime()
-			if !localFileModTime.IsZero() {
-				req.Header.Set("If-Modified-Since", localFileModTime.UTC().Format(http.TimeFormat))
-			}
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return common.NewErrorf("Failed to download Geofile from %s: %v", url, err)
-		}
-		defer resp.Body.Close()
-
-		// Parse Last-Modified header from server
-		var serverModTime time.Time
-		serverModTimeStr := resp.Header.Get("Last-Modified")
-		if serverModTimeStr != "" {
-			parsedTime, err := time.Parse(http.TimeFormat, serverModTimeStr)
-			if err != nil {
-				logger.Warningf("Failed to parse Last-Modified header for %s: %v", url, err)
-			} else {
-				serverModTime = parsedTime
-			}
-		}
-
-		// Function to update local file's modification time
-		updateFileModTime := func() {
-			if !serverModTime.IsZero() {
-				if err := os.Chtimes(destPath, serverModTime, serverModTime); err != nil {
-					logger.Warningf("Failed to update modification time for %s: %v", destPath, err)
-				}
-			}
-		}
-
-		// Handle 304 Not Modified
-		if resp.StatusCode == http.StatusNotModified {
-			updateFileModTime()
-			return nil
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			return common.NewErrorf("Failed to download Geofile from %s: received status code %d", url, resp.StatusCode)
-		}
-
-		file, err := os.Create(destPath)
-		if err != nil {
-			return common.NewErrorf("Failed to create Geofile %s: %v", destPath, err)
-		}
-		defer file.Close()
-
-		_, err = io.Copy(file, resp.Body)
-		if err != nil {
-			return common.NewErrorf("Failed to save Geofile %s: %v", destPath, err)
-		}
-
-		updateFileModTime()
-		return nil
-	}
-
-	var errorMessages []string
-
-	if fileName == "" {
-		// Download all geofiles
-		for _, entry := range geofileAllowlist {
-			destPath := filepath.Join(config.GetBinFolderPath(), entry.FileName)
-			if err := downloadFile(entry.URL, destPath); err != nil {
-				errorMessages = append(errorMessages, fmt.Sprintf("Error downloading Geofile '%s': %v", entry.FileName, err))
-			}
-		}
-	} else {
-		entry := geofileAllowlist[fileName]
-		destPath := filepath.Join(config.GetBinFolderPath(), entry.FileName)
-		if err := downloadFile(entry.URL, destPath); err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("Error downloading Geofile '%s': %v", entry.FileName, err))
-		}
-	}
-
-	err := s.RestartXrayService()
-	if err != nil {
-		errorMessages = append(errorMessages, fmt.Sprintf("Updated Geofile '%s' but Failed to start Xray: %v", fileName, err))
-	}
-
-	if len(errorMessages) > 0 {
-		return common.NewErrorf("%s", strings.Join(errorMessages, "\r\n"))
-	}
-
 	return nil
 }
 

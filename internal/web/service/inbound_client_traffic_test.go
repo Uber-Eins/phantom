@@ -10,17 +10,15 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
-// TestAddClientTraffic_MatchesByEmail covers two scenarios that share one fix:
+// TestAddClientTraffic_MatchesByEmail covers two scenarios that share one rule:
 // client_traffics is keyed by email (one shared row per email no matter how many
 // inbounds the client is attached to), so local traffic must be applied by email
 // regardless of which inbound_id the row happens to carry.
 //
 //   - staleEmail: the row points at an inbound id that no longer exists (a deleted
 //     earlier incarnation, AddClientStat's OnConflict-DoNothing never refreshes it).
-//   - dualEmail: the client is attached to both a node inbound and the mother inbound,
-//     but the node inbound was attached first, so the shared row carries the node
-//     inbound's id (issue #4921). The old `inbound_id NOT IN (node inbounds)` filter
-//     dropped this client's local traffic, leaving it stuck at zero and offline.
+//   - dualEmail: the client is attached to two local inbounds, while the shared
+//     row points at the first one.
 //
 // Both must have their local traffic counted.
 func TestAddClientTraffic_MatchesByEmail(t *testing.T) {
@@ -40,18 +38,15 @@ func TestAddClientTraffic_MatchesByEmail(t *testing.T) {
 	if err := db.Create(localInbound).Error; err != nil {
 		t.Fatalf("create local inbound: %v", err)
 	}
-	nodeID := 1
-	nodeInbound := &model.Inbound{UserId: 1, Tag: "node-in", Enable: true, Port: 40002, Protocol: model.VLESS, NodeID: &nodeID}
-	if err := db.Create(nodeInbound).Error; err != nil {
-		t.Fatalf("create node inbound: %v", err)
+	secondInbound := &model.Inbound{UserId: 1, Tag: "second-in", Enable: true, Port: 40002, Protocol: model.VLESS}
+	if err := db.Create(secondInbound).Error; err != nil {
+		t.Fatalf("create second inbound: %v", err)
 	}
 
 	if err := db.Create(&xray.ClientTraffic{InboundId: 9999, Email: staleEmail, Enable: true}).Error; err != nil {
 		t.Fatalf("create stale client_traffics: %v", err)
 	}
-	// Attached to both inbounds, but the node inbound won the OnConflict so the
-	// shared row is owned by the node inbound id.
-	if err := db.Create(&xray.ClientTraffic{InboundId: nodeInbound.Id, Email: dualEmail, Enable: true}).Error; err != nil {
+	if err := db.Create(&xray.ClientTraffic{InboundId: secondInbound.Id, Email: dualEmail, Enable: true}).Error; err != nil {
 		t.Fatalf("create dual client_traffics: %v", err)
 	}
 
@@ -80,10 +75,10 @@ func TestAddClientTraffic_MatchesByEmail(t *testing.T) {
 		t.Fatalf("reload dual row: %v", err)
 	}
 	if dual.Up != 30 || dual.Down != 40 {
-		t.Errorf("node-owned row not updated by local traffic (issue #4921): up=%d down=%d, want 30/40", dual.Up, dual.Down)
+		t.Errorf("shared row not updated by local traffic: up=%d down=%d, want 30/40", dual.Up, dual.Down)
 	}
 	if dual.LastOnline == 0 {
-		t.Errorf("node-owned row LastOnline not set (client stayed offline)")
+		t.Errorf("shared row LastOnline not set (client stayed offline)")
 	}
 }
 

@@ -97,7 +97,7 @@ export const XHttpStreamSettingsSchema = z.preprocess(migrateLegacyXhttp, z.obje
   serverMaxHeaderBytes: z.number().int().min(0).default(0),
   uplinkHTTPMethod: z.string().default(''),
   headers: WsHeaderMapSchema.default({}),
-  // Client-side fields stored on inbound for subscription propagation.
+  // Client-side fields stored on inbound for connection-link generation.
   // The server listener ignores them at runtime, but the panel embeds
   // them in share-link `extra` blobs so the same xhttp config can
   // round-trip on both sides.

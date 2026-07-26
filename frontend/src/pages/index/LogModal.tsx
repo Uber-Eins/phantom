@@ -21,7 +21,6 @@ export default function LogModal({ open, onClose }: LogModalProps) {
   const { isMobile } = useMediaQuery();
   const [rows, setRows] = useState('20');
   const [level, setLevel] = useState('info');
-  const [syslog, setSyslog] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -32,7 +31,6 @@ export default function LogModal({ open, onClose }: LogModalProps) {
     try {
       const msg = await HttpUtil.post<string[]>(`/panel/api/server/logs/${rows}`, {
         level,
-        syslog,
       });
       if (msg?.success) {
         setLogs(msg.obj || []);
@@ -41,7 +39,7 @@ export default function LogModal({ open, onClose }: LogModalProps) {
     } finally {
       setLoading(false);
     }
-  }, [rows, level, syslog]);
+  }, [rows, level]);
 
   const refreshRef = useRef(refresh);
   useEffect(() => {
@@ -55,7 +53,7 @@ export default function LogModal({ open, onClose }: LogModalProps) {
 
   useEffect(() => {
     if (openRef.current) refresh();
-  }, [rows, level, syslog, refresh]);
+  }, [rows, level, refresh]);
 
   useEffect(() => {
     if (!open || !autoUpdate) return;
@@ -118,9 +116,6 @@ export default function LogModal({ open, onClose }: LogModalProps) {
           </Space.Compact>
         </Form.Item>
         <Form.Item>
-          <Checkbox checked={syslog} onChange={(e) => setSyslog(e.target.checked)}>
-            SysLog
-          </Checkbox>
           <Checkbox checked={autoUpdate} onChange={(e) => setAutoUpdate(e.target.checked)}>
             {t('pages.index.autoUpdate')}
           </Checkbox>

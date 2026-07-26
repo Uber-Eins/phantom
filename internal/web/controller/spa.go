@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"path"
 	"strings"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/web/entity"
@@ -26,10 +25,9 @@ func NewXUIController(g *gin.RouterGroup) *XUIController {
 
 // initRouter sets up the main panel routes and initializes sub-controllers.
 //
-// The HTML routes all hand the same single-page-app shell (index.html) to the
-// browser; React Router takes over and renders the correct page from the URL.
-// The /panel/api, /panel/setting, /panel/xray sub-routers register POST/JSON
-// endpoints on different paths and stay untouched by the shell handler.
+// The explicit HTML routes all hand the same single-page-app shell (index.html)
+// to the browser; React Router takes over and renders the correct page from the
+// URL. JSON endpoints remain isolated below /panel/api.
 func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g = g.Group("/panel")
 	g.Use(a.checkLogin)
@@ -38,13 +36,10 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/", a.panelSPA)
 	g.GET("/inbounds", a.panelSPA)
 	g.GET("/clients", a.panelSPA)
-	g.GET("/groups", a.panelSPA)
-	g.GET("/nodes", a.panelSPA)
 	g.GET("/settings", a.panelSPA)
 	g.GET("/xray", a.panelSPA)
 	g.GET("/outbound", a.panelSPA)
 	g.GET("/routing", a.panelSPA)
-	g.GET("/api-docs", a.panelSPA)
 
 	// SPA pages built by Vite don't have a server-rendered <meta name="csrf-token">,
 	// so they fetch the session token via this endpoint at startup and replay it
@@ -52,9 +47,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/csrf-token", a.csrfToken)
 }
 
-// panelSPA serves the React SPA shell. Every GET under /panel/ that isn't an
-// API endpoint returns the same index.html — React Router reads the URL and
-// mounts the matching page on the client.
+// panelSPA serves the React SPA shell for one of the allowlisted panel pages.
 func (a *XUIController) panelSPA(c *gin.Context) {
 	serveDistPage(c, "index.html")
 }
@@ -102,31 +95,17 @@ func isPanelSPAFallbackRequest(c *gin.Context) bool {
 		return false
 	}
 
-	if reqPath == panelPath+"/csrf-token" || strings.HasPrefix(reqPath, panelPath+"/csrf-token/") {
-		return false
+	allowed := map[string]struct{}{
+		panelPath:               {},
+		panelPath + "/":         {},
+		panelPath + "/inbounds": {},
+		panelPath + "/clients":  {},
+		panelPath + "/settings": {},
+		panelPath + "/xray":     {},
+		panelPath + "/outbound": {},
+		panelPath + "/routing":  {},
 	}
-	if reqPath == panelPath+"/api" || strings.HasPrefix(reqPath, panelPath+"/api/") {
-		return false
-	}
-	if isStaticAssetPath(reqPath) {
-		return false
-	}
-	return true
-}
-
-var staticAssetExts = map[string]struct{}{
-	".js": {}, ".mjs": {}, ".cjs": {}, ".css": {}, ".map": {}, ".json": {},
-	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".svg": {}, ".ico": {},
-	".webp": {}, ".avif": {}, ".woff": {}, ".woff2": {}, ".ttf": {}, ".eot": {},
-	".otf": {}, ".wasm": {}, ".txt": {}, ".xml": {}, ".webmanifest": {},
-}
-
-func isStaticAssetPath(reqPath string) bool {
-	ext := strings.ToLower(path.Ext(reqPath))
-	if ext == "" {
-		return false
-	}
-	_, ok := staticAssetExts[ext]
+	_, ok := allowed[reqPath]
 	return ok
 }
 

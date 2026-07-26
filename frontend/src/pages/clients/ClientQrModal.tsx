@@ -8,19 +8,10 @@ import { QrPanel } from '@/pages/inbounds/qr';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import { buildWireguardClientConfig, findWireguardInbound, isWireguardClient } from './wireguardConfig';
 
-interface SubSettings {
-  enable: boolean;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  publicHost?: string;
-}
-
 interface ClientQrModalProps {
   open: boolean;
   client: ClientRecord | null;
   inboundsById: Record<number, InboundOption>;
-  subSettings?: SubSettings;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -29,40 +20,26 @@ interface ApiMsg<T = unknown> {
   obj?: T;
 }
 
-const DEFAULT_SUB: SubSettings = { enable: false, subURI: '', subJsonURI: '', subJsonEnable: false, publicHost: '' };
-
 export default function ClientQrModal({
   open,
   client,
   inboundsById,
-  subSettings = DEFAULT_SUB,
   onOpenChange,
 }: ClientQrModalProps) {
   const { t } = useTranslation();
   const [links, setLinks] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const subLink = useMemo(() => {
-    if (!client?.subId || !subSettings?.enable || !subSettings?.subURI) return '';
-    return subSettings.subURI + client.subId;
-  }, [client?.subId, subSettings?.enable, subSettings?.subURI]);
-
-  const subJsonLink = useMemo(() => {
-    if (!client?.subId || !subSettings?.enable) return '';
-    if (!subSettings?.subJsonEnable || !subSettings?.subJsonURI) return '';
-    return subSettings.subJsonURI + client.subId;
-  }, [client?.subId, subSettings?.enable, subSettings?.subJsonEnable, subSettings?.subJsonURI]);
-
   const wgInbound = useMemo(() => findWireguardInbound(client, inboundsById), [client, inboundsById]);
   const wgConfigText = useMemo(() => {
     if (!client || !wgInbound || !isWireguardClient(client)) return '';
-    return buildWireguardClientConfig(client, wgInbound, window.location.hostname, subSettings?.publicHost ?? '');
-  }, [client, wgInbound, subSettings?.publicHost]);
+    return buildWireguardClientConfig(client, wgInbound, window.location.hostname);
+  }, [client, wgInbound]);
 
-  const hasAnything = !!subLink || !!subJsonLink || !!wgConfigText || links.length > 0;
+  const hasAnything = !!wgConfigText || links.length > 0;
 
   useEffect(() => {
-    if (!open || !client?.subId) {
+    if (!open || !client?.email) {
       setLinks([]);
       return;
     }
@@ -71,7 +48,7 @@ export default function ClientQrModal({
     (async () => {
       try {
         const msg = await HttpUtil.get(
-          `/panel/api/clients/subLinks/${encodeURIComponent(client.subId!)}`,
+          `/panel/api/clients/links/${encodeURIComponent(client.email)}`,
         ) as ApiMsg<string[]>;
         if (!cancelled) {
           setLinks(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
@@ -81,26 +58,12 @@ export default function ClientQrModal({
       }
     })();
     return () => { cancelled = true; };
-  }, [open, client?.subId]);
+  }, [open, client?.email]);
 
   const [activeKey, setActiveKey] = useState<string[]>([]);
 
   const items = useMemo(() => {
     const out: { key: string; label: React.ReactNode; children: React.ReactNode }[] = [];
-    if (subLink) {
-      out.push({
-        key: 'sub',
-        label: t('subscription.title'),
-        children: <QrPanel value={subLink} remark={`${client?.email || ''} — ${t('subscription.title')}`} />,
-      });
-    }
-    if (subJsonLink) {
-      out.push({
-        key: 'subJson',
-        label: `${t('subscription.title')} (JSON)`,
-        children: <QrPanel value={subJsonLink} remark={`${client?.email || ''} — JSON`} />,
-      });
-    }
     links.forEach((link, idx) => {
       const parts = parseLinkParts(link);
       const meta = parts ? linkMetaText(parts) : '';
@@ -136,7 +99,7 @@ export default function ClientQrModal({
       });
     }
     return out;
-  }, [subLink, subJsonLink, wgConfigText, links, client?.email, t]);
+  }, [wgConfigText, links, client?.email, t]);
 
   useEffect(() => {
     if (!open) {
@@ -156,10 +119,7 @@ export default function ClientQrModal({
       onCancel={() => onOpenChange(false)}
     >
       <Spin spinning={loading}>
-        {!client?.subId && !loading && (
-          <div style={{ padding: 24, textAlign: 'center', opacity: 0.6 }}>{t('pages.clients.noSubId')}</div>
-        )}
-        {client?.subId && !hasAnything && !loading && (
+        {client && !hasAnything && !loading && (
           <div style={{ padding: 24, textAlign: 'center', opacity: 0.6 }}>{t('pages.clients.noLinks')}</div>
         )}
         {hasAnything && (

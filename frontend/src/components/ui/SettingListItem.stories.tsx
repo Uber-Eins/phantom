@@ -31,8 +31,8 @@ type Story = StoryObj<typeof meta>;
 
 export const WithSwitch: Story = {
   args: {
-    title: 'Enable subscription',
-    description: 'Expose an aggregated subscription URL for this client.',
+    title: 'Enable client',
+    description: 'Allow this client to connect through its assigned inbounds.',
     control: <Switch defaultChecked />,
   },
 };

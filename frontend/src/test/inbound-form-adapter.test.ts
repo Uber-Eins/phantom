@@ -6,7 +6,7 @@ import {
   formValuesToWirePayload,
   type RawInboundRow,
 } from '@/lib/xray/inbound-form-adapter';
-import { InboundDbFieldsSchema, InboundFormSchema } from '@/schemas/forms/inbound-form';
+import { InboundFormSchema } from '@/schemas/forms/inbound-form';
 import { normalizeXhttpForWire } from '@/lib/xray/stream-wire-normalize';
 import { SockoptStreamSettingsSchema } from '@/schemas/protocols/stream/sockopt';
 
@@ -34,17 +34,14 @@ const vlessRow: RawInboundRow = {
   trafficReset: 'monthly',
   lastTrafficResetTime: 0,
   tag: 'inbound-1',
-  nodeId: null,
   settings: {
     clients: [{
       id: '8c14d6f7-2e3b-4a91-9d24-3f7a6b8c1e02',
       email: 'alice@example.test',
       flow: '',
-      limitIp: 0,
       totalGB: 0,
       expiryTime: 0,
       enable: true,
-      tgId: 0,
       subId: 'abc123def',
       comment: '',
       reset: 0,
@@ -105,8 +102,6 @@ describe('rawInboundToFormValues', () => {
       if (name === 'empty stream settings drop to undefined') {
         expect(values.streamSettings).toBeUndefined();
       }
-      expect(values.shareAddrStrategy).toBe('node');
-      expect(values.shareAddr).toBe('');
     });
   }
 
@@ -222,29 +217,6 @@ describe('formValuesToWirePayload', () => {
     expect(payload.sniffing).toBe('');
   });
 
-  it('omits nodeId when null', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, nodeId: null });
-    const payload = formValuesToWirePayload(values);
-    expect('nodeId' in payload).toBe(false);
-  });
-
-  it('includes nodeId when set', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, nodeId: 42 });
-    const payload = formValuesToWirePayload(values);
-    expect(payload.nodeId).toBe(42);
-  });
-
-  it('round-trips share address strategy fields', () => {
-    const values = rawInboundToFormValues({
-      ...vlessRow,
-      shareAddrStrategy: 'custom',
-      shareAddr: 'edge.example.test',
-    });
-    const payload = formValuesToWirePayload(values);
-    expect(payload.shareAddrStrategy).toBe('custom');
-    expect(payload.shareAddr).toBe('edge.example.test');
-  });
-
   it('round-trips top-level fields through raw → values → payload → values', () => {
     // settings/streamSettings/sniffing don't round-trip byte-equal because
     // the wire payload prunes empty arrays and collapses disabled sniffing
@@ -268,7 +240,6 @@ describe('formValuesToWirePayload', () => {
       expiryTime: payload.expiryTime,
       trafficReset: payload.trafficReset,
       lastTrafficResetTime: payload.lastTrafficResetTime,
-      nodeId: payload.nodeId ?? null,
     });
     expect(replay.protocol).toBe(original.protocol);
     expect(replay.port).toBe(original.port);
@@ -277,48 +248,6 @@ describe('formValuesToWirePayload', () => {
     expect(replay.up).toBe(original.up);
     expect(replay.down).toBe(original.down);
     expect(replay.streamSettings).toEqual(original.streamSettings);
-  });
-});
-
-describe('subSortIndex', () => {
-  it('rawInboundToFormValues defaults to 1 when field is absent', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: undefined });
-    expect(values.subSortIndex).toBe(1);
-  });
-
-  it('rawInboundToFormValues preserves valid values and clamps below-minimum ones to 1', () => {
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: 5 }).subSortIndex).toBe(5);
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: 0 }).subSortIndex).toBe(1);
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: -10 }).subSortIndex).toBe(1);
-  });
-
-  it('formValuesToWirePayload includes subSortIndex in the payload', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: 3 });
-    const payload = formValuesToWirePayload(values);
-    expect(payload.subSortIndex).toBe(3);
-  });
-
-  it('subSortIndex round-trips through raw → values → payload', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: 42 });
-    const payload = formValuesToWirePayload(values);
-    const replay = rawInboundToFormValues({ ...vlessRow, subSortIndex: payload.subSortIndex });
-    expect(replay.subSortIndex).toBe(42);
-  });
-
-  it('InboundDbFieldsSchema enforces an integer minimum of 1 and defaults to 1', () => {
-    // Reject for the RIGHT reason: the issue must be about subSortIndex, not some
-    // unrelated field — otherwise a schema that rejects everything would pass.
-    const nonInt = InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 1.5 });
-    expect(nonInt.success).toBe(false);
-    if (!nonInt.success) expect(nonInt.error.issues[0]?.path).toContain('subSortIndex');
-
-    const belowMin = InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 0 });
-    expect(belowMin.success).toBe(false);
-    if (!belowMin.success) expect(belowMin.error.issues[0]?.path).toContain('subSortIndex');
-
-    // A valid integer >= 1 must pass (guards against a mutant rejecting all values).
-    expect(InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 5 }).success).toBe(true);
-    expect(InboundDbFieldsSchema.parse({}).subSortIndex).toBe(1);
   });
 });
 

@@ -18,7 +18,7 @@ const visionFlow = "xtls-rprx-vision"
 // encryption is set). Nothing restored the flow when the inbound later became
 // eligible — an inbound edit stores its settings verbatim and never re-gates the
 // clients — so enabling encryption on an existing XHTTP inbound left every
-// client without flow, and the share links/subscriptions dropped it.
+// client without flow, and generated connection links dropped it.
 //
 // This runs on the now-final inbound settings: when the inbound IS flow-eligible
 // it sets flow=Vision on each client that currently has no flow but whose

@@ -1,5 +1,3 @@
-import type { NodeRecord } from '@/api/queries/useNodesQuery';
-
 export interface StreamHints {
   network: string;
   isTls: boolean;
@@ -22,7 +20,6 @@ export interface DBInboundRecord extends ProtocolFlags {
   id: number;
   enable: boolean;
   remark: string;
-  subSortIndex: number;
   port: number;
   protocol: string;
   up: number;
@@ -30,7 +27,6 @@ export interface DBInboundRecord extends ProtocolFlags {
   total: number;
   expiryTime: number;
   _expiryTime: { valueOf(): number } | null;
-  nodeId?: number | null;
   settings: unknown;
   streamSettings: unknown;
 }
@@ -54,14 +50,13 @@ export type RowAction =
   | 'showInfo'
   | 'qrcode'
   | 'export'
-  | 'subs'
   | 'clipboard'
   | 'delete'
   | 'resetTraffic'
   | 'delAllClients'
   | 'clone';
 
-export type GeneralAction = 'import' | 'export' | 'subs' | 'resetInbounds';
+export type GeneralAction = 'import' | 'resetInbounds';
 
 export interface InboundListProps {
   dbInbounds: DBInboundRecord[];
@@ -73,9 +68,6 @@ export interface InboundListProps {
   trafficDiff: number;
   pageSize: number;
   isMobile: boolean;
-  subEnable: boolean;
-  nodesById: Map<number, NodeRecord>;
-  hasActiveNode: boolean;
   onAddInbound: () => void;
   onGeneralAction: (key: GeneralAction) => void;
   onRowAction: (action: { key: RowAction; dbInbound: DBInboundRecord }) => void;

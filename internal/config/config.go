@@ -71,11 +71,8 @@ func IsDevBuild() bool {
 	return GetBuildCommit() != ""
 }
 
-// GetPanelVersion returns the version a panel advertises to a managing master
-// node and displays in the UI: the plain version for stable builds, or
-// "dev+<short commit>" for dev builds. The dev form mirrors the master's
-// getPanelUpdateInfo latestVersion so a node on the current dev commit compares
-// as up to date instead of always showing "update available".
+// GetPanelVersion returns the version displayed in the UI: the plain release
+// version for stable builds, or "dev+<short commit>" for development builds.
 func GetPanelVersion() string {
 	if !IsDevBuild() {
 		return GetBaseVersion()
@@ -169,14 +166,6 @@ func GetDBPath() string {
 	return fmt.Sprintf("%s/%s.db", GetDBFolderPath(), GetName())
 }
 
-// GetUpdateStatusFilePath returns the path to the panel self-update status
-// file update.sh writes on completion. It lives beside the database, outside
-// XUI_MAIN_FOLDER, so it survives an update regardless of what happens to
-// that folder.
-func GetUpdateStatusFilePath() string {
-	return filepath.Join(GetDBFolderPath(), "update-status.json")
-}
-
 // GetDBKind returns the configured database backend: "sqlite" (default) or "postgres".
 func GetDBKind() string {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("XUI_DB_TYPE")))
@@ -191,19 +180,6 @@ func GetDBKind() string {
 // GetDBDSN returns the PostgreSQL DSN from XUI_DB_DSN. Empty for sqlite.
 func GetDBDSN() string {
 	return strings.TrimSpace(os.Getenv("XUI_DB_DSN"))
-}
-
-// GetEnvFilePaths returns the candidate service environment file paths (the file
-// systemd loads via EnvironmentFile) across the supported distro families.
-func GetEnvFilePaths() []string {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	return []string{
-		"/etc/default/x-ui",
-		"/etc/conf.d/x-ui",
-		"/etc/sysconfig/x-ui",
-	}
 }
 
 // GetLogFolder returns the path to the log folder based on environment variables or platform defaults.

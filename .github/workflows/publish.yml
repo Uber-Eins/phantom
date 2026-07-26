@@ -1,0 +1,48 @@
+name: Publish OCI image
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Build and publish semantic and stable tags
+        env:
+          IMAGE: ghcr.io/uber-eins/phantom
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "invalid semantic release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          podman build \
+            --network host \
+            --platform linux/amd64 \
+            --format oci \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.version=$version" \
+            --tag "$IMAGE:$version" \
+            --tag "$IMAGE:stable" \
+            --file Containerfile \
+            .
+          podman push "$IMAGE:$version"
+          podman push "$IMAGE:stable"

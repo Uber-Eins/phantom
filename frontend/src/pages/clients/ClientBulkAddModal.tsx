@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AutoComplete, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Tooltip, message } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -12,7 +12,6 @@ import { TLS_FLOW_CONTROL } from '@/schemas/primitives';
 import { DateTimePicker, SelectAllClearButtons } from '@/components/form';
 import { FormField } from '@/components/form/rhf';
 import { useClients, type InboundOption } from '@/hooks/useClients';
-import { useFail2banStatusQuery, getLimitIpNotice } from '@/api/queries/useFail2banStatusQuery';
 import { ClientBulkAddFormSchema, type ClientBulkAddFormValues } from '@/schemas/client';
 
 const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL);
@@ -29,10 +28,8 @@ const EMPTY: ClientBulkAddFormValues = {
   emailPostfix: '',
   quantity: 1,
   subId: '',
-  group: '',
   comment: '',
   flow: '',
-  limitIp: 0,
   totalGB: 0,
   expiryTime: 0,
   reset: 0,
@@ -42,7 +39,6 @@ const EMPTY: ClientBulkAddFormValues = {
 interface ClientBulkAddModalProps {
   open: boolean;
   inbounds: InboundOption[];
-  groups?: string[];
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
 }
@@ -50,7 +46,6 @@ interface ClientBulkAddModalProps {
 export default function ClientBulkAddModal({
   open,
   inbounds,
-  groups = [],
   onOpenChange,
   onSaved,
 }: ClientBulkAddModalProps) {
@@ -65,12 +60,8 @@ export default function ClientBulkAddModal({
   const flow = useWatch({ control: methods.control, name: 'flow' });
   const expiryTime = useWatch({ control: methods.control, name: 'expiryTime' });
   const subId = useWatch({ control: methods.control, name: 'subId' });
-  const limitIp = useWatch({ control: methods.control, name: 'limitIp' });
   const [delayedStart, setDelayedStart] = useState(false);
   const [saving, setSaving] = useState(false);
-  const fail2ban = useFail2banStatusQuery();
-  const limitIpDisabled = !fail2ban.usable;
-  const limitIpNotice = getLimitIpNotice(fail2ban, t);
 
   useEffect(() => {
     if (!open) return;
@@ -175,8 +166,6 @@ export default function ClientBulkAddModal({
           totalGB: Math.round((current.totalGB || 0) * SizeFormatter.ONE_GB),
           expiryTime: current.expiryTime,
           reset: Number(current.reset) || 0,
-          limitIp: Number(current.limitIp) || 0,
-          group: current.group,
           comment: current.comment,
           enable: true,
         },
@@ -288,19 +277,6 @@ export default function ClientBulkAddModal({
               </Space.Compact>
             </Form.Item>
 
-            <FormField
-              name="group"
-              label={t('pages.clients.group')}
-              tooltip={t('pages.clients.groupDesc')}
-              transform={{ output: (v) => v ?? '' }}
-            >
-              <AutoComplete
-                placeholder={t('pages.clients.groupPlaceholder')}
-                options={groups.map((g) => ({ value: g }))}
-                allowClear
-              />
-            </FormField>
-
             <FormField name="comment" label={t('comment')}>
               <Input />
             </FormField>
@@ -316,16 +292,6 @@ export default function ClientBulkAddModal({
                 />
               </FormField>
             )}
-
-            <Form.Item label={t('pages.clients.limitIp')}>
-              <Tooltip title={limitIpNotice || undefined}>
-                <span style={{ display: 'inline-flex' }}>
-                  <InputNumber value={limitIp} min={0} disabled={limitIpDisabled}
-                    style={limitIpDisabled ? { pointerEvents: 'none' } : undefined}
-                    onChange={(v) => methods.setValue('limitIp', Number(v) || 0)} />
-                </span>
-              </Tooltip>
-            </Form.Item>
 
             <FormField name="totalGB" label={t('pages.clients.totalGB')} transform={{ output: (v) => Number(v) || 0 }}>
               <InputNumber min={0} step={1} />

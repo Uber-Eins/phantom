@@ -18,8 +18,6 @@ export interface DbInboundLike {
   up?: number;
   down?: number;
   total?: number;
-  shareAddrStrategy?: string;
-  shareAddr?: string;
 }
 
 function fillProtocolSettingsDefaults(protocol: string, settings: Record<string, unknown>): Record<string, unknown> {
@@ -50,8 +48,6 @@ export function inboundFromDb(raw: DbInboundLike): Inbound {
     up: raw.up ?? 0,
     down: raw.down ?? 0,
     total: raw.total ?? 0,
-    shareAddrStrategy: raw.shareAddrStrategy ?? 'node',
-    shareAddr: raw.shareAddr ?? '',
     settings,
     streamSettings,
     sniffing,

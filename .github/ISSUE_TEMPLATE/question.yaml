@@ -1,5 +1,5 @@
 name: Question
-description: Ask how to do something with 3x-ui
+description: Ask how to do something with Phantom
 title: "[Question]: "
 labels: ["question"]
 
@@ -9,8 +9,8 @@ body:
       value: |
         Before opening a question, please:
 
-        - Read the [project Wiki](https://github.com/MHSanaei/3x-ui/wiki) —
-          most setup, install, and "how do I …" answers live there.
+        - Read the [project README](https://github.com/uber-eins/phantom#readme) —
+          installation, updates, and backup guidance live there.
         - Search [existing issues](../issues?q=is%3Aissue) — the question
           may already have been asked.
 
@@ -43,7 +43,7 @@ body:
   - type: input
     id: xui-version
     attributes:
-      label: 3x-ui version
+      label: Phantom version
       description: Shown at the top of the panel sidebar.
       placeholder: 3.1.0
     validations:
@@ -52,12 +52,10 @@ body:
   - type: dropdown
     id: install-method
     attributes:
-      label: How did you install 3x-ui?
+      label: Deployment
       options:
-        - install.sh script
-        - Docker / Docker Compose
-        - Manual build from source
-        - Other
+        - Rootless Podman + Quadlet
+        - Local source build for development
     validations:
       required: true
 
@@ -82,7 +80,7 @@ body:
     attributes:
       label: Before submitting
       options:
-        - label: I read the [Wiki](https://github.com/MHSanaei/3x-ui/wiki) and searched [existing issues](../issues?q=is%3Aissue).
+        - label: I read the [README](https://github.com/uber-eins/phantom#readme) and searched [existing issues](../issues?q=is%3Aissue).
           required: true
         - label: This is a usage question, not a bug report.
           required: true

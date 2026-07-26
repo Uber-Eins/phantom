@@ -55,7 +55,7 @@ describe('normalizeXhttpForWire stream-one', () => {
     expect(out).not.toHaveProperty('headers');
   });
 
-  it('preserves non-default scMinPostsIntervalMs on inbound for subscriptions', () => {
+  it('preserves non-default scMinPostsIntervalMs on inbound for generated links', () => {
     const out = normalizeXhttpForWire({
       path: '/app',
       mode: 'packet-up',
@@ -90,7 +90,7 @@ describe('normalizeXhttpForWire stream-one', () => {
     expect(out).not.toHaveProperty('scMaxEachPostBytes');
   });
 
-  it('keeps inbound xmux when enableXmux is on (stored for subscription extra; stripped from xray config on Go side)', () => {
+  it('keeps inbound xmux when enabled for generated-link extra data', () => {
     const out = normalizeXhttpForWire({
       path: '/app',
       mode: 'auto',
@@ -306,13 +306,19 @@ describe('inbound formValuesToWirePayload integration', () => {
       listen: '0.0.0.0',
       tag: 'in-443',
       expiryTime: 0,
-      sniffing: { enabled: false },
+      sniffing: {
+        enabled: false,
+        destOverride: [],
+        metadataOnly: false,
+        routeOnly: false,
+        ipsExcluded: [],
+        domainsExcluded: [],
+      },
       up: 0,
       down: 0,
       total: 0,
       trafficReset: 'never',
       lastTrafficResetTime: 0,
-      nodeId: null,
       protocol: 'vless',
       settings: { clients: [{ id: '7eeb09ed-ae97-400d-a1ce-2485fb904407', email: 'n' }], decryption: 'none' },
       streamSettings: {
@@ -342,7 +348,7 @@ describe('inbound formValuesToWirePayload integration', () => {
           tcpcongestion: 'bbr',
         },
       },
-    } as InboundFormValues;
+    } as unknown as InboundFormValues;
 
     const payload = formValuesToWirePayload(values);
     const stream = JSON.parse(payload.streamSettings) as Record<string, unknown>;
@@ -365,13 +371,19 @@ describe('inbound formValuesToWirePayload integration', () => {
       listen: '',
       tag: 'hy2-443',
       expiryTime: 0,
-      sniffing: { enabled: false },
+      sniffing: {
+        enabled: false,
+        destOverride: [],
+        metadataOnly: false,
+        routeOnly: false,
+        ipsExcluded: [],
+        domainsExcluded: [],
+      },
       up: 0,
       down: 0,
       total: 0,
       trafficReset: 'never',
       lastTrafficResetTime: 0,
-      nodeId: null,
       protocol: 'hysteria',
       settings: { version: 2, clients: [] },
       streamSettings: {
@@ -402,7 +414,7 @@ describe('inbound formValuesToWirePayload integration', () => {
     expect(settings).not.toHaveProperty('fingerprint');
   });
 
-  it('preserves non-default scMinPostsIntervalMs in packet-up inbound wire payload for subscriptions', () => {
+  it('preserves non-default scMinPostsIntervalMs in packet-up inbound wire payload for generated links', () => {
     const values = {
       remark: 't',
       enable: true,
@@ -416,7 +428,6 @@ describe('inbound formValuesToWirePayload integration', () => {
       total: 0,
       trafficReset: 'never',
       lastTrafficResetTime: 0,
-      nodeId: null,
       protocol: 'vless',
       settings: { clients: [{ id: '7eeb09ed-ae97-400d-a1ce-2485fb904407', email: 'n' }], decryption: 'none' },
       streamSettings: {
@@ -464,7 +475,6 @@ describe('inbound formValuesToWirePayload integration', () => {
       total: 0,
       trafficReset: 'never',
       lastTrafficResetTime: 0,
-      nodeId: null,
       protocol: 'vless',
       settings: { clients: [{ id: '7eeb09ed-ae97-400d-a1ce-2485fb904407', email: 'n' }], decryption: 'none' },
       streamSettings: {

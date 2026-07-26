@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea or improvement for 3x-ui
+description: Suggest an idea or improvement for Phantom
 title: "[Feature]: "
 labels: ["enhancement", "needs triage"]
 
@@ -69,13 +69,10 @@ body:
         - Frontend (UI / panel pages)
         - Backend (API endpoints, login, settings)
         - Xray config generation
-        - Subscription (share links / Clash / JSON)
+        - Local client share links / QR codes
         - Statistics / traffic counters
         - Database / migrations
-        - Install / upgrade script
-        - Docker image
-        - Multi-node (sub-nodes)
-        - Telegram bot
+        - OCI image / Quadlet
         - Other
     validations:
       required: false

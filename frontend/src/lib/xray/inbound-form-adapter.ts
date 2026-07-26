@@ -1,4 +1,4 @@
-import type { InboundFormValues, ShareAddrStrategy, TrafficReset } from '@/schemas/forms/inbound-form';
+import type { InboundFormValues, TrafficReset } from '@/schemas/forms/inbound-form';
 import type { InboundSettings } from '@/schemas/protocols/inbound';
 import {
   HysteriaClientSchema,
@@ -42,10 +42,6 @@ export interface RawInboundRow {
   expiryTime?: number;
   trafficReset?: string;
   lastTrafficResetTime?: number;
-  nodeId?: number | null;
-  shareAddrStrategy?: string;
-  shareAddr?: string;
-  subSortIndex?: number;
   clientStats?: unknown;
 }
 
@@ -69,10 +65,6 @@ export interface WireInboundPayload {
   sniffing: string;
   tag: string;
   clientStats?: unknown;
-  nodeId?: number;
-  shareAddrStrategy: ShareAddrStrategy;
-  shareAddr: string;
-  subSortIndex: number;
 }
 
 function coerceJsonObject(value: unknown): Record<string, unknown> {
@@ -94,18 +86,10 @@ function coerceJsonObject(value: unknown): Record<string, unknown> {
 }
 
 const TRAFFIC_RESETS: TrafficReset[] = ['never', 'hourly', 'daily', 'weekly', 'monthly'];
-const SHARE_ADDR_STRATEGIES: ShareAddrStrategy[] = ['node', 'listen', 'custom'];
-
 function coerceTrafficReset(v: unknown): TrafficReset {
   return typeof v === 'string' && (TRAFFIC_RESETS as string[]).includes(v)
     ? (v as TrafficReset)
     : 'never';
-}
-
-function coerceShareAddrStrategy(v: unknown): ShareAddrStrategy {
-  return typeof v === 'string' && (SHARE_ADDR_STRATEGIES as string[]).includes(v)
-    ? (v as ShareAddrStrategy)
-    : 'node';
 }
 
 // Network values that map to a required `${network}Settings` key in
@@ -203,10 +187,6 @@ export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
     total: row.total ?? 0,
     trafficReset: coerceTrafficReset(row.trafficReset),
     lastTrafficResetTime: row.lastTrafficResetTime ?? 0,
-    nodeId: row.nodeId ?? null,
-    shareAddrStrategy: coerceShareAddrStrategy(row.shareAddrStrategy),
-    shareAddr: row.shareAddr ?? '',
-    subSortIndex: Math.max(1, row.subSortIndex ?? 1),
     protocol,
     settings,
   } as InboundFormValues;
@@ -354,10 +334,6 @@ export function formValuesToWirePayload(values: InboundFormValues): WireInboundP
     // rather than the default { enabled: false } so the row carries no sniffing.
     sniffing: canEnableSniffing({ protocol: values.protocol }) ? JSON.stringify(normalizeSniffing(values.sniffing)) : '',
     tag: values.tag,
-    shareAddrStrategy: values.shareAddrStrategy,
-    shareAddr: values.shareAddr,
-    subSortIndex: values.subSortIndex,
   };
-  if (values.nodeId != null) payload.nodeId = values.nodeId;
   return payload;
 }

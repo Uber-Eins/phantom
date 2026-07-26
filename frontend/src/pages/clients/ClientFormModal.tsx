@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AutoComplete,
   Button,
   Col,
   Form,
@@ -14,25 +13,20 @@ import {
   Space,
   Switch,
   Tabs,
-  Tag,
-  Tooltip,
-  Typography,
   message,
 } from 'antd';
-import { DeleteOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, RetweetOutlined } from '@ant-design/icons';
+import { ReloadOutlined, RetweetOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { FormProvider, useForm, useWatch, useFieldArray } from 'react-hook-form';
+import { FormProvider, useForm, useWatch } from 'react-hook-form';
 
-import { HttpUtil, RandomUtil, Wireguard } from '@/utils';
+import { RandomUtil, Wireguard } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
 import { generateMtprotoSecret } from '@/lib/xray/inbound-defaults';
-import { normalizeClientIps, type ClientIpInfo } from '@/lib/clients/ip-log';
 import { DateTimePicker, SelectAllClearButtons } from '@/components/form';
 import { FormField } from '@/components/form/rhf';
 import { TLS_FLOW_CONTROL } from '@/schemas/primitives';
-import type { ClientRecord, InboundOption, ExternalLink, ExternalLinkInput } from '@/hooks/useClients';
-import { useFail2banStatusQuery, getLimitIpNotice } from '@/api/queries/useFail2banStatusQuery';
+import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import { ClientFormSchema, ClientCreateFormSchema, type ClientFormValues } from '@/schemas/client';
 
 const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL);
@@ -43,13 +37,6 @@ const MULTI_CLIENT_PROTOCOLS = new Set([
 ]);
 
 const CLIENT_FORM_MODAL_Z_INDEX = 1000;
-const CLIENT_IP_LOG_MODAL_Z_INDEX = CLIENT_FORM_MODAL_Z_INDEX + 1;
-
-interface ExternalLinkRow {
-  kind: 'link' | 'subscription';
-  value: string;
-  remark: string;
-}
 
 interface ApiMsg<T = unknown> {
   success?: boolean;
@@ -64,13 +51,11 @@ interface SaveMetaEdit {
   email: string;
   attach: number[];
   detach: number[];
-  externalLinks: ExternalLinkInput[];
 }
 
 interface SaveMetaCreate {
   isEdit: false;
   email: string;
-  externalLinks: ExternalLinkInput[];
 }
 
 interface SaveCreatePayload {
@@ -83,10 +68,7 @@ interface ClientFormModalProps {
   mode: Mode;
   client: ClientRecord | null;
   inbounds: InboundOption[];
-  attachedExternalLinks?: ExternalLink[];
   attachedIds?: number[];
-  tgBotEnable?: boolean;
-  groups?: string[];
   save: (
     payload: Record<string, unknown> | SaveCreatePayload,
     meta: SaveMetaEdit | SaveMetaCreate,
@@ -97,7 +79,6 @@ interface ClientFormModalProps {
 
 type Values = ClientFormValues & {
   expiryDate: number;
-  externalLinks: ExternalLinkRow[];
   wgPrivateKey: string;
   wgPublicKey: string;
   wgPreSharedKey: string;
@@ -120,27 +101,15 @@ const EMPTY: Values = {
   delayedStart: false,
   delayedDays: 0,
   reset: 0,
-  limitIp: 0,
-  tgId: 0,
-  group: '',
   comment: '',
   enable: true,
   inboundIds: [],
-  externalLinks: [],
   wgPrivateKey: '',
   wgPublicKey: '',
   wgPreSharedKey: '',
   wgAllowedIPs: '',
   secret: '',
   adTag: '',
-};
-
-function toExternalLinkRows(links: ExternalLink[] | undefined): ExternalLinkRow[] {
-  return (links || []).map((l) => ({
-    kind: l.kind === 'subscription' ? 'subscription' : 'link',
-    value: l.value || '',
-    remark: l.remark || '',
-  }));
 }
 
 function bytesToGB(bytes: number): number {
@@ -165,10 +134,7 @@ export default function ClientFormModal({
   mode,
   client,
   inbounds,
-  attachedExternalLinks = [],
   attachedIds = [],
-  tgBotEnable = false,
-  groups = [],
   save,
   resetTraffic,
   onOpenChange,
@@ -191,30 +157,12 @@ export default function ClientFormModal({
   const subId = useWatch({ control: methods.control, name: 'subId' });
   const auth = useWatch({ control: methods.control, name: 'auth' });
   const wgPrivateKey = useWatch({ control: methods.control, name: 'wgPrivateKey' });
-  const limitIp = useWatch({ control: methods.control, name: 'limitIp' });
-  const {
-    fields: externalLinkFields,
-    append: appendExternalLink,
-    remove: removeExternalLink,
-  } = useFieldArray({ control: methods.control, name: 'externalLinks' });
 
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [clientIps, setClientIps] = useState<ClientIpInfo[]>([]);
-  const [ipsLoading, setIpsLoading] = useState(false);
-  const [ipsClearing, setIpsClearing] = useState(false);
-  const [ipsModalOpen, setIpsModalOpen] = useState(false);
-  const fail2ban = useFail2banStatusQuery();
-  const limitIpDisabled = !fail2ban.usable;
-  const limitIpNotice = getLimitIpNotice(fail2ban, t);
-
-  function addExternalLinkRow(kind: 'link' | 'subscription') {
-    appendExternalLink({ kind, value: '', remark: '' });
-  }
 
   useEffect(() => {
     if (!open) return;
-    setIpsModalOpen(false);
 
     if (isEdit && client) {
       const et = Number(client.expiryTime) || 0;
@@ -232,13 +180,9 @@ export default function ClientFormModal({
         reverseTag: client.reverse?.tag || '',
         totalGB: bytesToGB(client.totalGB || 0),
         reset: Number(client.reset) || 0,
-        limitIp: client.limitIp || 0,
-        tgId: Number(client.tgId) || 0,
-        group: client.group || '',
         comment: client.comment || '',
         enable: !!client.enable,
         inboundIds: Array.isArray(attachedIds) ? [...attachedIds] : [],
-        externalLinks: toExternalLinkRows(attachedExternalLinks),
         wgPrivateKey: client.privateKey || '',
         wgPublicKey: client.publicKey || '',
         wgPreSharedKey: client.preSharedKey || '',
@@ -256,7 +200,6 @@ export default function ClientFormModal({
         seed.expiryDate = et > 0 ? et : 0;
       }
       methods.reset(seed);
-      void loadIps();
     } else {
       const wgKeypair = Wireguard.generateKeypair();
       methods.reset({
@@ -420,41 +363,6 @@ export default function ClientFormModal({
     [expiryDate],
   );
 
-  const linkRows = externalLinkFields
-    .map((field, index) => ({ field, index }))
-    .filter((row) => row.field.kind === 'link');
-  const subscriptionRows = externalLinkFields
-    .map((field, index) => ({ field, index }))
-    .filter((row) => row.field.kind === 'subscription');
-
-  async function loadIps() {
-    if (!isEdit || !client?.email) return;
-    setIpsLoading(true);
-    try {
-      const msg = await HttpUtil.post(`/panel/api/clients/ips/${encodeURIComponent(client.email)}`) as ApiMsg<unknown[]>;
-      if (!msg?.success) { setClientIps([]); return; }
-      setClientIps(normalizeClientIps(msg.obj));
-    } finally {
-      setIpsLoading(false);
-    }
-  }
-
-  function openIpsModal() {
-    setIpsModalOpen(true);
-    if (clientIps.length === 0) void loadIps();
-  }
-
-  async function clearIps() {
-    if (!isEdit || !client?.email) return;
-    setIpsClearing(true);
-    try {
-      const msg = await HttpUtil.post(`/panel/api/clients/clearIps/${encodeURIComponent(client.email)}`) as ApiMsg;
-      if (msg?.success) setClientIps([]);
-    } finally {
-      setIpsClearing(false);
-    }
-  }
-
   function close() {
     onOpenChange(false);
   }
@@ -490,9 +398,6 @@ export default function ClientFormModal({
       delayedStart: values.delayedStart,
       delayedDays: values.delayedDays,
       reset: values.reset,
-      limitIp: values.limitIp,
-      tgId: values.tgId,
-      group: values.group,
       comment: values.comment,
       enable: values.enable,
       inboundIds: values.inboundIds,
@@ -517,9 +422,6 @@ export default function ClientFormModal({
       totalGB: totalBytes,
       expiryTime,
       reset: Number(values.reset) || 0,
-      limitIp: Number(values.limitIp) || 0,
-      tgId: Number(values.tgId) || 0,
-      group: values.group,
       comment: values.comment,
       enable: !!values.enable,
     };
@@ -553,10 +455,6 @@ export default function ClientFormModal({
       clientPayload.adTag = adTag;
     }
 
-    const externalLinks: ExternalLinkInput[] = values.externalLinks
-      .map((r) => ({ kind: r.kind, value: r.value.trim(), remark: (r.remark || '').trim() }))
-      .filter((r) => r.value !== '');
-
     setSubmitting(true);
     try {
       let msg;
@@ -570,12 +468,11 @@ export default function ClientFormModal({
           email: client.email,
           attach: toAttach,
           detach: toDetach,
-          externalLinks,
         });
       } else {
         msg = await save(
           { client: clientPayload, inboundIds: values.inboundIds },
-          { isEdit: false, email: clientPayload.email as string, externalLinks },
+          { isEdit: false, email: clientPayload.email as string },
         );
       }
       if (msg?.success) close();
@@ -604,7 +501,6 @@ export default function ClientFormModal({
                 description={t('pages.inbounds.resetTrafficContent')}
                 okText={t('reset')}
                 cancelText={t('cancel')}
-                zIndex={CLIENT_IP_LOG_MODAL_Z_INDEX}
                 onConfirm={onResetTraffic}
               >
                 <Button color="danger" variant="filled" icon={<RetweetOutlined />} loading={resetting}>
@@ -657,26 +553,6 @@ export default function ClientFormModal({
                             <InputNumber min={0} step={1} style={{ width: '100%' }} />
                           </FormField>
                         </Col>
-                        <Col xs={24} md={6}>
-                          <Form.Item label={t('pages.clients.limitIp')} tooltip={t('pages.clients.limitIpDesc')}>
-                            <Tooltip title={limitIpNotice || undefined}>
-                              <span style={{ display: 'flex', width: '100%' }}>
-                                <Space.Compact style={{ display: 'flex', flex: 1 }}>
-                                  <InputNumber value={limitIp} min={0} disabled={limitIpDisabled}
-                                    style={{ flex: 1, ...(limitIpDisabled ? { pointerEvents: 'none' } : null) }}
-                                    onChange={(v) => methods.setValue('limitIp', Number(v) || 0)} />
-                                  {isEdit && (
-                                    <Tooltip title={t('pages.clients.ipLog')}>
-                                      <Button aria-label={t('pages.clients.ipLog')} icon={<EyeOutlined />} loading={ipsLoading} onClick={openIpsModal}>
-                                        {clientIps.length > 0 ? clientIps.length : ''}
-                                      </Button>
-                                    </Tooltip>
-                                  )}
-                                </Space.Compact>
-                              </span>
-                            </Tooltip>
-                          </Form.Item>
-                        </Col>
                       </Row>
 
                       <Row gutter={16}>
@@ -728,43 +604,15 @@ export default function ClientFormModal({
                             <Input />
                           </FormField>
                         </Col>
-                        <Col xs={24} md={12}>
-                          <FormField
-                            name="group"
-                            label={t('pages.clients.group')}
-                            tooltip={t('pages.clients.groupDesc')}
-                            transform={{ output: (v) => v ?? '' }}
-                          >
-                            <AutoComplete
-                              placeholder={t('pages.clients.groupPlaceholder')}
-                              options={groups.map((g) => ({ value: g }))}
-                              allowClear
-                            />
-                          </FormField>
-                        </Col>
                       </Row>
 
-                      {(tgBotEnable || showReverseTag) && (
+                      {showReverseTag && (
                         <Row gutter={16}>
-                          {tgBotEnable && (
-                            <Col xs={24} md={12}>
-                              <FormField
-                                name="tgId"
-                                label={t('pages.clients.telegramId')}
-                                transform={{ output: (v) => Number(v) || 0 }}
-                              >
-                                <InputNumber min={0} controls={false}
-                                  placeholder={t('pages.clients.telegramIdPlaceholder')} style={{ width: '100%' }} />
-                              </FormField>
-                            </Col>
-                          )}
-                          {showReverseTag && (
-                            <Col xs={24} md={12}>
-                              <FormField name="reverseTag" label={t('pages.clients.reverseTag')}>
-                                <Input placeholder={t('pages.clients.reverseTagPlaceholder')} />
-                              </FormField>
-                            </Col>
-                          )}
+                          <Col xs={24} md={12}>
+                            <FormField name="reverseTag" label={t('pages.clients.reverseTag')}>
+                              <Input placeholder={t('pages.clients.reverseTagPlaceholder')} />
+                            </FormField>
+                          </Col>
                         </Row>
                       )}
 
@@ -900,118 +748,12 @@ export default function ClientFormModal({
                     </>
                   ),
                 },
-                {
-                  key: 'links',
-                  label: t('pages.clients.tabLinks'),
-                  children: (
-                    <>
-                      <Typography.Paragraph type="secondary" style={{ marginTop: 4 }}>
-                        {t('pages.clients.linksHint')}
-                      </Typography.Paragraph>
-
-                      <Button type="primary" icon={<PlusOutlined />} onClick={() => addExternalLinkRow('link')}>
-                        {t('pages.clients.addExternalLink')}
-                      </Button>
-                      <div style={{ marginTop: 12, marginBottom: 24 }}>
-                        {linkRows.length === 0 ? (
-                          <Typography.Text type="secondary">{t('pages.clients.noExternalLinks')}</Typography.Text>
-                        ) : linkRows.map(({ field, index }) => (
-                          <div key={field.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                            <FormField name={`externalLinks.${index}.value`} noStyle>
-                              <Input
-                                style={{ flex: 1 }}
-                                aria-label="vless:// · vmess:// · trojan:// · ss:// · hysteria2:// · wireguard://"
-                                placeholder="vless:// · vmess:// · trojan:// · ss:// · hysteria2:// · wireguard://"
-                              />
-                            </FormField>
-                            <FormField name={`externalLinks.${index}.remark`} noStyle>
-                              <Input
-                                style={{ width: 140 }}
-                                aria-label={t('remark')}
-                                placeholder={t('remark')}
-                              />
-                            </FormField>
-                            <Tooltip title={t('delete')}>
-                              <Button aria-label={t('delete')} danger icon={<DeleteOutlined />} onClick={() => removeExternalLink(index)} />
-                            </Tooltip>
-                          </div>
-                        ))}
-                      </div>
-
-                      <Button type="primary" icon={<PlusOutlined />} onClick={() => addExternalLinkRow('subscription')}>
-                        {t('pages.clients.addExternalSubscription')}
-                      </Button>
-                      <div style={{ marginTop: 12 }}>
-                        {subscriptionRows.length === 0 ? (
-                          <Typography.Text type="secondary">{t('pages.clients.noExternalSubscriptions')}</Typography.Text>
-                        ) : subscriptionRows.map(({ field, index }) => (
-                          <div key={field.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                            <FormField name={`externalLinks.${index}.value`} noStyle>
-                              <Input
-                                style={{ flex: 1 }}
-                                aria-label="https://provider.example/sub/…"
-                                placeholder="https://provider.example/sub/…"
-                              />
-                            </FormField>
-                            <Tooltip title={t('delete')}>
-                              <Button aria-label={t('delete')} danger icon={<DeleteOutlined />} onClick={() => removeExternalLink(index)} />
-                            </Tooltip>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ),
-                },
               ]}
             />
           </Form>
         </FormProvider>
       </Modal>
 
-      <Modal
-        open={ipsModalOpen}
-        title={`${t('pages.clients.ipLog')}${client?.email ? ` — ${client.email}` : ''}`}
-        width={440}
-        zIndex={CLIENT_IP_LOG_MODAL_Z_INDEX}
-        onCancel={() => setIpsModalOpen(false)}
-        footer={[
-          <Button key="refresh" icon={<ReloadOutlined />} loading={ipsLoading} onClick={loadIps}>
-            {t('refresh')}
-          </Button>,
-          <Button key="clear" danger loading={ipsClearing} disabled={clientIps.length === 0} onClick={clearIps}>
-            {t('pages.clients.clearAll')}
-          </Button>,
-          <Button key="close" type="primary" onClick={() => setIpsModalOpen(false)}>
-            {t('close')}
-          </Button>,
-        ]}
-      >
-        {clientIps.length > 0 ? (
-          <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-            {clientIps.map((entry, idx) => (
-              <Tag
-                key={idx}
-                color="blue"
-                style={{
-                  display: 'block',
-                  width: 'fit-content',
-                  maxWidth: '100%',
-                  marginBottom: 6,
-                  padding: '2px 8px',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                }}
-              >
-                {entry.ip}{entry.time ? ` (${entry.time})` : ''}
-                {entry.node ? (
-                  <span style={{ marginInlineStart: 6, opacity: 0.85, fontWeight: 600 }}>@ {entry.node}</span>
-                ) : null}
-              </Tag>
-            ))}
-          </div>
-        ) : (
-          <Tag>{t('tgbot.noIpRecord')}</Tag>
-        )}
-      </Modal>
     </>
   );
 }

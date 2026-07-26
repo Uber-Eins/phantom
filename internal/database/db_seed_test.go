@@ -163,10 +163,7 @@ func TestNormalizeSettingPaths_RepairsLegacyValues(t *testing.T) {
 	t.Cleanup(func() { _ = CloseDB() })
 
 	seed := []model.Setting{
-		{Key: "subJsonPath", Value: "YIrCXJOOOL"},
-		{Key: "subPath", Value: "/sub"},
-		{Key: "subClashPath", Value: "clash/"},
-		{Key: "webBasePath", Value: "/panel/"},
+		{Key: "webBasePath", Value: "panel"},
 	}
 	for i := range seed {
 		if err := db.Create(&seed[i]).Error; err != nil {
@@ -179,10 +176,7 @@ func TestNormalizeSettingPaths_RepairsLegacyValues(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"subJsonPath":  "/YIrCXJOOOL/",
-		"subPath":      "/sub/",
-		"subClashPath": "/clash/",
-		"webBasePath":  "/panel/",
+		"webBasePath": "/panel/",
 	}
 	for key, expected := range want {
 		var row model.Setting

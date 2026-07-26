@@ -24,22 +24,18 @@ import type { WireguardInboundSettings } from '@/schemas/protocols/inbound/wireg
 interface ClientBaseSeed {
   email?: string;
   subId?: string;
-  limitIp?: number;
   totalGB?: number;
   expiryTime?: number;
   enable?: boolean;
-  tgId?: number;
   comment?: string;
   reset?: number;
 }
 
 interface ClientBase {
   email: string;
-  limitIp: number;
   totalGB: number;
   expiryTime: number;
   enable: boolean;
-  tgId: number;
   subId: string;
   comment: string;
   reset: number;
@@ -48,11 +44,9 @@ interface ClientBase {
 function clientBase(seed: ClientBaseSeed = {}): ClientBase {
   return {
     email: seed.email ?? RandomUtil.randomLowerAndNum(10),
-    limitIp: seed.limitIp ?? 0,
     totalGB: seed.totalGB ?? 0,
     expiryTime: seed.expiryTime ?? 0,
     enable: seed.enable ?? true,
-    tgId: seed.tgId ?? 0,
     subId: seed.subId ?? RandomUtil.randomLowerAndNum(16),
     comment: seed.comment ?? '',
     reset: seed.reset ?? 0,

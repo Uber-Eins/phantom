@@ -117,33 +117,6 @@
   margin: 10px 0;
 }
 
-.tg-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ip-log {
-  max-height: 150px;
-  overflow-y: auto;
-  text-align: left;
-}
-
-.ip-log-row {
-  display: block;
-  margin: 2px 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-}
-
-.ip-log-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 5px;
-  font-size: 16px;
-  cursor: pointer;
-}
-
 .protocol-table {
   margin-top: 10px;
 }

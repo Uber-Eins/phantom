@@ -1,31 +1,77 @@
-# Cloud deployment (unattended install)
+# Rootless Quadlet 部署
 
-Tooling to ship the 3x-ui panel via unattended install, with **per-instance
-credentials generated on first boot** (never `admin/admin`, never a shared
-session secret). Works on amd64 and arm64.
+维护的部署文件只有 [`quadlet/phantom.container`](quadlet/phantom.container)。它使用 Host 网络、SQLite 持久卷、registry 自动更新和本机 HTTP/HTTPS 健康检查。
 
-| Path | What it is | Use when |
-| --- | --- | --- |
-| [`cloud-init/`](cloud-init/) | Generic cloud-init user-data (unattended `install.sh`) | Any cloud, no image build |
-| [`marketplace/hetzner/`](marketplace/hetzner/) | Hetzner Cloud notes | Hetzner deployments |
-| [`test/`](test/) | Container smoke test | Verifying the install path |
+## 安装或更新单元
 
-## How it works
+```sh
+install -d -m 700 "$HOME/.local/share/phantom"
+podman quadlet install ./deploy/quadlet/phantom.container
+systemctl --user daemon-reload
+systemctl --user enable --now phantom.service
+```
 
-`install.sh` runs unattended when `XUI_NONINTERACTIVE=1` or stdin is not a TTY.
-Each instance installs and configures itself with random credentials. See
-[`cloud-init/README.md`](cloud-init/README.md).
+修改 Quadlet 后重新执行 `podman quadlet install`，再运行：
 
-## Unattended install knobs
+```sh
+systemctl --user daemon-reload
+systemctl --user restart phantom.service
+```
 
-`install.sh` reads these env vars in non-interactive mode (all optional; unset ⇒
-secure random / default):
+单元固定使用：
 
-`XUI_USERNAME`, `XUI_PASSWORD`, `XUI_PANEL_PORT`, `XUI_WEB_BASE_PATH`,
-`XUI_SSL_MODE` (`none`|`ip`|`domain`, default `none`), `XUI_DOMAIN`,
-`XUI_ACME_EMAIL`, `XUI_ACME_HTTP_PORT` (ACME HTTP-01 listener port, default `80`),
-`XUI_SSL_IPV6` (optional IPv6 address to add to an `ip`-mode cert),
-`XUI_SERVER_IP` (fallback IP for the displayed access URL when auto-detection fails),
-`XUI_DB_TYPE` (`sqlite`|`postgres`), `XUI_DB_DSN`.
+- `ghcr.io/uber-eins/phantom:stable`
+- `Network=host`
+- `AutoUpdate=registry`
+- `%h/.local/share/phantom:/etc/x-ui`
+- `TZ=Asia/Singapore`
+- `XUI_PORT=2053`
 
-The resulting credentials are written to `/etc/x-ui/install-result.env` (mode 600).
+Host 网络意味着不需要也不应配置 `PublishPort`。低位端口由宿主机的
+`net.ipv4.ip_unprivileged_port_start` 控制。
+
+## 登录后继续运行
+
+```sh
+loginctl enable-linger "$USER"
+systemctl --user is-enabled phantom.service
+```
+
+## 健康与日志
+
+```sh
+systemctl --user status phantom.service
+podman inspect --format '{{.State.Health.Status}}' phantom
+podman healthcheck run phantom
+journalctl --user -u phantom.service
+```
+
+健康命令同时尝试本机 HTTP 和 HTTPS，因此启用面板证书后不需要修改 Quadlet。
+
+## Registry 自动更新
+
+```sh
+systemctl --user enable --now podman-auto-update.timer
+podman auto-update --dry-run
+systemctl --user list-timers podman-auto-update.timer
+```
+
+只有已经保存的 `stable` 镜像版本会被部署。更新失败时，systemd 保留服务失败状态和日志；SQLite 数据不在镜像层中。
+
+## 备份与恢复
+
+在线数据库备份和恢复通过仪表盘完成。完整目录备份需要先停止服务：
+
+```sh
+systemctl --user stop phantom.service
+cp -a "$HOME/.local/share/phantom" "$HOME/.local/share/phantom.backup"
+systemctl --user start phantom.service
+```
+
+恢复目录时停止服务，将备份内容复制回
+`$HOME/.local/share/phantom`，确认目录只对当前用户可读写，然后重新启动。首次启动和恢复后都可用以下命令验证：
+
+```sh
+podman healthcheck run phantom
+podman auto-update --dry-run
+```

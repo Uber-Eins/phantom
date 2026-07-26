@@ -34,7 +34,6 @@ import {
   DatabaseOutlined,
   ForkOutlined,
   CopyOutlined,
-  TelegramFilled,
 } from '@ant-design/icons';
 
 import { HttpUtil, SizeFormatter, TimeFormatter, ClipboardManager, FileManager } from '@/utils';
@@ -48,15 +47,12 @@ import { LazyMount } from '@/components/utility';
 import { setMessageInstance } from '@/utils/messageBus';
 import StatusCard from './StatusCard';
 import XrayStatusCard from './XrayStatusCard';
-import type { PanelUpdateInfo } from './PanelUpdateModal';
 const JsonEditor = lazy(() => import('@/components/form/JsonEditor'));
-const PanelUpdateModal = lazy(() => import('./PanelUpdateModal'));
 const LogModal = lazy(() => import('./LogModal'));
 const BackupModal = lazy(() => import('./BackupModal'));
 const SystemHistoryModal = lazy(() => import('./SystemHistoryModal'));
 const XrayMetricsModal = lazy(() => import('./XrayMetricsModal'));
 const XrayLogModal = lazy(() => import('./XrayLogModal'));
-const VersionModal = lazy(() => import('./VersionModal'));
 import './IndexPage.css';
 
 export default function IndexPage() {
@@ -68,46 +64,31 @@ export default function IndexPage() {
   useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
 
   const [accessLogEnable, setAccessLogEnable] = useState(false);
-  const [devChannelEnable, setDevChannelEnable] = useState(false);
-  const [panelUpdateInfo, setPanelUpdateInfo] = useState<PanelUpdateInfo>({
-    currentVersion: '',
-    latestVersion: '',
-    updateAvailable: false,
-  });
 
   const basePath = window.X_UI_BASE_PATH || '';
 
   const [showIp, setShowIp] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
-  const [panelUpdateOpen, setPanelUpdateOpen] = useState(false);
   const [sysHistoryOpen, setSysHistoryOpen] = useState(false);
   const [xrayMetricsOpen, setXrayMetricsOpen] = useState(false);
   const [xrayLogsOpen, setXrayLogsOpen] = useState(false);
-  const [versionOpen, setVersionOpen] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
   const [configText, setConfigText] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingTip, setLoadingTip] = useState(t('loading'));
 
   useEffect(() => {
-    HttpUtil.post<{ accessLogEnable?: boolean; devChannelEnable?: boolean }>(
+    HttpUtil.post<{ accessLogEnable?: boolean }>(
       '/panel/api/setting/defaultSettings',
     ).then((msg) => {
       if (msg?.success && msg.obj) {
         setAccessLogEnable(!!msg.obj.accessLogEnable);
-        setDevChannelEnable(!!msg.obj.devChannelEnable);
       }
-    });
-    HttpUtil.get<PanelUpdateInfo>('/panel/api/server/getPanelUpdateInfo').then((msg) => {
-      if (msg?.success && msg.obj) setPanelUpdateInfo(msg.obj);
     });
   }, []);
 
-  const displayVersion = useMemo(
-    () => window.X_UI_CUR_VER || panelUpdateInfo.currentVersion || '?',
-    [panelUpdateInfo.currentVersion],
-  );
+  const displayVersion = useMemo(() => window.X_UI_CUR_VER || '?', []);
 
   const setBusy = useCallback(
     ({ busy, tip }: { busy: boolean; tip?: string }) => {
@@ -126,22 +107,6 @@ export default function IndexPage() {
     await HttpUtil.post('/panel/api/server/restartXrayService');
     await refresh();
   }, [refresh]);
-
-  function openPanelVersion() {
-    setPanelUpdateOpen(true);
-  }
-
-  async function handleChannelChange(dev: boolean) {
-    const res = await HttpUtil.post('/panel/api/server/setUpdateChannel', { dev });
-    if (!res?.success) return;
-    setDevChannelEnable(dev);
-    const msg = await HttpUtil.get<PanelUpdateInfo>('/panel/api/server/getPanelUpdateInfo');
-    if (msg?.success && msg.obj) setPanelUpdateInfo(msg.obj);
-  }
-
-  function openTelegram() {
-    window.open('https://t.me/XrayUI', '_blank', 'noopener,noreferrer');
-  }
 
   async function openConfig() {
     setLoading(true);
@@ -204,7 +169,6 @@ export default function IndexPage() {
                       onRestartXray={restartXray}
                       onOpenXrayLogs={() => setXrayLogsOpen(true)}
                       onOpenLogs={() => setLogsOpen(true)}
-                      onOpenVersionSwitch={() => setVersionOpen(true)}
                     />
                   </Col>
 
@@ -235,38 +199,15 @@ export default function IndexPage() {
                         <Space>
                           <span>3X-UI</span>
                           {isMobile && displayVersion && (
-                            <Tag color={panelUpdateInfo.updateAvailable ? 'orange' : 'green'}>
-                              {panelUpdateInfo.updateAvailable
-                                ? formatPanelVersion(panelUpdateInfo.latestVersion)
-                                : formatPanelVersion(displayVersion)}
-                            </Tag>
+                            <Tag color="green">{formatPanelVersion(displayVersion)}</Tag>
                           )}
                         </Space>
                       }
                       hoverable
                       actions={[
-                        <Space className="action" key="tg" role="button" tabIndex={0} aria-label="@XrayUI" onClick={openTelegram} onKeyDown={activateOnKey(openTelegram)}>
-                          <TelegramFilled aria-hidden="true" />
-                          {!isMobile && <span>@XrayUI</span>}
-                        </Space>,
-                        <Space
-                          key="panel-version"
-                          className={`action ${panelUpdateInfo.updateAvailable ? 'action-update' : ''}`}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={t('pages.index.updatePanel')}
-                          onClick={openPanelVersion}
-                          onKeyDown={activateOnKey(openPanelVersion)}
-                        >
-                          <CloudDownloadOutlined />
-                          {!isMobile && (
-                            <span>
-                              {panelUpdateInfo.updateAvailable
-                                ? `${t('update')} ${formatPanelVersion(panelUpdateInfo.latestVersion)}`
-                                : formatPanelVersion(displayVersion)}
-                            </span>
-                          )}
-                        </Space>,
+                        <span key="panel-version" className="action">
+                          {formatPanelVersion(displayVersion)}
+                        </span>,
                       ]}
                     />
                   </Col>
@@ -466,16 +407,6 @@ export default function IndexPage() {
           </Layout.Content>
         </Layout>
 
-        <LazyMount when={panelUpdateOpen}>
-          <PanelUpdateModal
-            open={panelUpdateOpen}
-            info={panelUpdateInfo}
-            devChannelEnable={devChannelEnable}
-            onChannelChange={handleChannelChange}
-            onClose={() => setPanelUpdateOpen(false)}
-            onBusy={setBusy}
-          />
-        </LazyMount>
         <LazyMount when={logsOpen}>
           <LogModal open={logsOpen} onClose={() => setLogsOpen(false)} />
         </LazyMount>
@@ -499,14 +430,6 @@ export default function IndexPage() {
         </LazyMount>
         <LazyMount when={xrayLogsOpen}>
           <XrayLogModal open={xrayLogsOpen} onClose={() => setXrayLogsOpen(false)} />
-        </LazyMount>
-        <LazyMount when={versionOpen}>
-          <VersionModal
-            open={versionOpen}
-            status={status}
-            onClose={() => setVersionOpen(false)}
-            onBusy={setBusy}
-          />
         </LazyMount>
 
         <LazyMount when={configTextOpen}>

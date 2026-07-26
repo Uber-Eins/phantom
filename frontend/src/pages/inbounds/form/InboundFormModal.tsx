@@ -18,7 +18,7 @@ import {
 import { Controller, FormProvider, useForm, useWatch } from 'react-hook-form';
 
 import { HttpUtil, NumberFormatter, RandomUtil, SizeFormatter, Wireguard } from '@/utils';
-import type { RealityScanResult } from '@/generated/types';
+import type { RealityScanResult } from '@/models/reality-scan';
 import {
   rawInboundToFormValues,
   formValuesToWirePayload,
@@ -83,7 +83,6 @@ import FallbacksCard from './FallbacksCard';
 import SniffingTab from './SniffingTab';
 
 import type { DBInbound } from '@/models/dbinbound';
-import type { NodeRecord } from '@/api/queries/useNodesQuery';
 
 
 /* Render a field label with a hover tooltip icon instead of an `extra` help line below. */
@@ -98,40 +97,6 @@ const labelWithHint = (label: string, hint: string) => (
 
 const PROTOCOL_OPTIONS = Object.values(Protocols).map((p) => ({ value: p, label: p }));
 const TRAFFIC_RESETS = ['never', 'hourly', 'daily', 'weekly', 'monthly'] as const;
-const SHARE_ADDR_STRATEGIES = ['node', 'listen', 'custom'] as const;
-const SHARE_ADDR_HOSTNAME_RE = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
-const NODE_ELIGIBLE_PROTOCOLS = new Set<string>([
-  Protocols.VLESS,
-  Protocols.VMESS,
-  Protocols.TROJAN,
-  Protocols.SHADOWSOCKS,
-  Protocols.HYSTERIA,
-  Protocols.WIREGUARD,
-]);
-
-function isValidShareAddrInput(value: string): boolean {
-  const v = value.trim();
-  if (v.length === 0) return true;
-  if (v.includes('://') || v.startsWith('//') || /[/?#@]/.test(v)) return false;
-  if (v.startsWith('[')) {
-    if (!v.endsWith(']')) return false;
-    try {
-      new URL(`http://${v}`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  if (v.includes(':')) {
-    try {
-      new URL(`http://[${v}]`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return SHARE_ADDR_HOSTNAME_RE.test(v);
-}
 
 interface InboundFormModalProps {
   open: boolean;
@@ -140,8 +105,6 @@ interface InboundFormModalProps {
   mode: 'add' | 'edit';
   dbInbound: DBInbound | null;
   dbInbounds: DBInbound[];
-  availableNodes?: NodeRecord[];
-  availableNodesFetched?: boolean;
 }
 
 function buildAddModeValues(): InboundFormValues {
@@ -189,8 +152,6 @@ export default function InboundFormModal({
   mode,
   dbInbound,
   dbInbounds,
-  availableNodes,
-  availableNodesFetched = true,
 }: InboundFormModalProps) {
   const { t } = useTranslation();
   const [messageApi, messageContextHolder] = message.useMessage();
@@ -213,15 +174,7 @@ export default function InboundFormModal({
     addAllFallbacks,
   } = useInboundFallbacks(dbInbound, dbInbounds);
 
-  const selectableNodes = (availableNodes || []).filter((n) => n.enable);
   const protocol = (useWatch({ control, name: 'protocol' }) ?? '') as string;
-  const isNodeEligible = NODE_ELIGIBLE_PROTOCOLS.has(protocol);
-  /*
-   * The `node` share-address strategy only means something when the inbound can
-   * actually live on a node — otherwise the node address it would resolve to is
-   * always empty. Offer it only then; `listen`/`custom` work for local inbounds.
-   */
-  const nodeShareOptionAvailable = selectableNodes.length > 0 && isNodeEligible;
   const vlessEncryption = useWatch({ control, name: 'settings.encryption' }) ?? '';
   const ssMethod = useWatch({ control, name: 'settings.method' });
   const isSSWith2022 = isSS2022({
@@ -248,8 +201,6 @@ export default function InboundFormModal({
   const wPort = useWatch({ control, name: 'port' });
   const wListen = (useWatch({ control, name: 'listen' }) ?? '') as string;
   const isUdsListen = wListen.startsWith('/') || wListen.startsWith('@');
-  const wNodeId = useWatch({ control, name: 'nodeId' }) ?? null;
-  const shareAddrStrategy = useWatch({ control, name: 'shareAddrStrategy' }) ?? 'node';
   const wTag = (useWatch({ control, name: 'tag' }) ?? '') as string;
   const wSsNetwork = useWatch({ control, name: 'settings.network' });
   const wTunnelNetwork = useWatch({ control, name: 'settings.allowedNetwork' });
@@ -259,7 +210,6 @@ export default function InboundFormModal({
   const lastWrittenTagRef = useRef('');
   const currentTagInput = (): InboundTagInput => ({
     port: typeof wPort === 'number' ? wPort : 0,
-    nodeId: typeof wNodeId === 'number' ? wNodeId : null,
     protocol,
     streamSettings: { network },
     settings: { network: wSsNetwork, allowedNetwork: wTunnelNetwork, udp: mixedUdpOn },
@@ -286,7 +236,7 @@ export default function InboundFormModal({
     setCertFromPanel,
     clearCertFiles,
     onSecurityChange,
-  } = useSecurityActions({ methods, setSaving, messageApi, nodeId: typeof wNodeId === 'number' ? wNodeId : null, setScanResult, setScanning });
+  } = useSecurityActions({ methods, setSaving, messageApi, setScanResult, setScanning });
 
 
   const toggleSockopt = (on: boolean) => {
@@ -364,7 +314,6 @@ export default function InboundFormModal({
     const initialTag = (initial.tag ?? '') as string;
     autoTagRef.current = isAutoInboundTag(initialTag, {
       port: initial.port ?? 0,
-      nodeId: initial.nodeId ?? null,
       protocol: initial.protocol,
       streamSettings: (initial.streamSettings ?? {}) as Record<string, unknown>,
       settings: (initial.settings ?? {}) as Record<string, unknown>,
@@ -398,30 +347,12 @@ export default function InboundFormModal({
       setV('tag', next);
     }
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [open, wPort, wNodeId, protocol, network, mixedUdpOn, wSsNetwork, wTunnelNetwork]);
-
-  /*
-   * Keep the strategy value inside the visible option set: when `node` isn't
-   * offered (no node, or a protocol that can't deploy to one) fall back to
-   * `listen`, which yields the same link for a local inbound. Mirrors how the
-   * protocol reset drops a nodeId that no longer applies.
-   * Only downgrade once the inputs this decision depends on are settled, so a
-   * persisted `node` strategy is never clobbered by transient mount state (#5375).
-   */
-  useEffect(() => {
-    if (!open) return;
-    if (!availableNodesFetched || !protocol) return;
-    const current = getV('shareAddrStrategy') as InboundFormValues['shareAddrStrategy'] | undefined;
-    if (!nodeShareOptionAvailable && (current ?? 'node') === 'node') {
-      setV('shareAddrStrategy', 'listen');
-    }
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [open, availableNodesFetched, protocol, nodeShareOptionAvailable, shareAddrStrategy]);
+  }, [open, wPort, protocol, network, mixedUdpOn, wSsNetwork, wTunnelNetwork]);
 
   /*
    * Protocol picker reset cascades through the form — clearing the settings DU
-   * branch and dropping a nodeId that no longer applies. Only a real user
-   * change (type === 'change') triggers it; programmatic setValue (advanced
+   * branch. Only a real user change (type === 'change') triggers it;
+   * programmatic setValue (advanced
    * JSON edits, open reset) must not, matching the legacy onValuesChange.
    */
   useEffect(() => {
@@ -432,9 +363,6 @@ export default function InboundFormModal({
       const next = getV('protocol') as string;
       const settings = createDefaultInboundSettings(next) ?? undefined;
       setV('settings', settings);
-      if (!NODE_ELIGIBLE_PROTOCOLS.has(next)) {
-        setV('nodeId', null);
-      }
       if (next === Protocols.HYSTERIA) {
         setV('streamSettings', {
           network: 'hysteria',
@@ -523,22 +451,6 @@ export default function InboundFormModal({
         <Input />
       </FormField>
 
-      {selectableNodes.length > 0 && isNodeEligible && (
-        <FormField name="nodeId" label={t('pages.inbounds.deployTo')}>
-          <Select
-            showSearch
-            disabled={mode === 'edit'}
-            placeholder={t('pages.inbounds.localPanel')}
-            allowClear
-            options={selectableNodes.map((n) => ({
-              value: n.id,
-              label: `${n.name}${n.status === 'offline' ? ' (offline)' : ''}`,
-              disabled: n.status === 'offline',
-            }))}
-          />
-        </FormField>
-      )}
-
       <FormField name="protocol" label={t('pages.inbounds.protocol')}>
         <Select id="protocol" disabled={mode === 'edit'} options={PROTOCOL_OPTIONS} />
       </FormField>
@@ -548,40 +460,6 @@ export default function InboundFormModal({
         label={labelWithHint(t('pages.inbounds.address'), t('pages.inbounds.form.listenHelp'))}
       >
         <Input placeholder={t('pages.inbounds.monitorDesc')} />
-      </FormField>
-
-      <FormField
-        name="shareAddrStrategy"
-        label={labelWithHint(t('pages.inbounds.form.shareAddrStrategy'), t('pages.inbounds.form.shareAddrStrategyHelp'))}
-      >
-        <Select
-          options={SHARE_ADDR_STRATEGIES
-            .filter((strategy) => strategy !== 'node' || nodeShareOptionAvailable)
-            .map((strategy) => ({
-              value: strategy,
-              label: t(`pages.inbounds.form.shareAddrStrategyOptions.${strategy}`),
-            }))}
-        />
-      </FormField>
-
-      {shareAddrStrategy === 'custom' && (
-        <FormField
-          name="shareAddr"
-          label={labelWithHint(t('pages.inbounds.form.shareAddr'), t('pages.inbounds.form.shareAddrHelp'))}
-          rules={{
-            validate: (value) =>
-              isValidShareAddrInput(String(value ?? '')) || t('pages.inbounds.form.shareAddrHelp'),
-          }}
-        >
-          <Input placeholder="edge.example.com" />
-        </FormField>
-      )}
-
-      <FormField
-        name="subSortIndex"
-        label={labelWithHint(t('pages.inbounds.form.subSortIndex'), t('pages.inbounds.form.subSortIndexHelp'))}
-      >
-        <InputNumber min={1} />
       </FormField>
 
       <FormField
@@ -752,10 +630,6 @@ export default function InboundFormModal({
           {network === 'kcp' && <KcpForm />}
         </>
       )}
-
-      {/* The legacy externalProxy section is replaced by the Hosts page; the
-          field is still parsed/rendered for backward compatibility but is no
-          longer editable here. */}
 
       <SockoptForm toggleSockopt={toggleSockopt} network={network} />
 

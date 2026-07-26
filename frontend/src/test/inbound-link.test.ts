@@ -6,12 +6,10 @@ import {
   genInboundLinks,
   genShadowsocksLink,
   genTrojanLink,
-  applyVlessRoute,
   genVlessLink,
   genVmessLink,
   genWireguardConfig,
   genWireguardLink,
-  preferPublicHost,
   resolveAddr,
 } from '@/lib/xray/inbound-link';
 import { InboundSchema } from '@/schemas/api/inbound';
@@ -57,7 +55,6 @@ describe('genVmessLink', () => {
         remark: 'parity-test',
         clientId: client.id,
         security: client.security as never,
-        externalProxy: null,
       });
       expect(link).toMatchSnapshot();
     });
@@ -82,60 +79,10 @@ describe('genVlessLink', () => {
         remark: 'parity-test',
         clientId: client.id,
         flow: client.flow as never,
-        externalProxy: null,
       });
       expect(link).toMatchSnapshot();
     });
   }
-});
-
-describe('applyVlessRoute', () => {
-  const id = '11111111-2222-4333-8444-555555555555';
-  it('encodes a single value into the 3rd group and no-ops on invalid input', () => {
-    expect(applyVlessRoute(id, '443')).toBe('11111111-2222-01bb-8444-555555555555');
-    expect(applyVlessRoute(id, '53')).toBe('11111111-2222-0035-8444-555555555555');
-    expect(applyVlessRoute(id, '0')).toBe('11111111-2222-0000-8444-555555555555');
-    expect(applyVlessRoute(id, '65535')).toBe('11111111-2222-ffff-8444-555555555555');
-    expect(applyVlessRoute(id, '')).toBe(id);
-    expect(applyVlessRoute(id, undefined)).toBe(id);
-    expect(applyVlessRoute(id, '70000')).toBe(id);
-    expect(applyVlessRoute(id, '53,443')).toBe(id);
-    expect(applyVlessRoute(id, 'abc')).toBe(id);
-    expect(applyVlessRoute('short', '443')).toBe('short');
-  });
-});
-
-describe('genVlessLink vlessRoute', () => {
-  const [, raw] = fixturesForProtocol('vless')[0];
-  const typed = InboundSchema.parse(raw);
-
-  it('bakes a host route value into the link UUID 3rd group', () => {
-    const link = genVlessLink({
-      inbound: typed,
-      address: 'example.test',
-      port: typed.port,
-      forceTls: 'same',
-      remark: 'r',
-      clientId: '11111111-2222-4333-8444-555555555555',
-      flow: '' as never,
-      externalProxy: { forceTls: 'same', dest: 'example.test', port: typed.port, remark: '', vlessRoute: '443' },
-    });
-    expect(link).toContain('vless://11111111-2222-01bb-8444-555555555555@');
-  });
-
-  it('leaves the UUID unchanged when no route is set', () => {
-    const link = genVlessLink({
-      inbound: typed,
-      address: 'example.test',
-      port: typed.port,
-      forceTls: 'same',
-      remark: 'r',
-      clientId: '11111111-2222-4333-8444-555555555555',
-      flow: '' as never,
-      externalProxy: null,
-    });
-    expect(link).toContain('vless://11111111-2222-4333-8444-555555555555@');
-  });
 });
 
 describe('genTrojanLink', () => {
@@ -155,7 +102,6 @@ describe('genTrojanLink', () => {
         forceTls: 'same',
         remark: 'parity-test',
         clientPassword: client.password,
-        externalProxy: null,
       });
       expect(link).toMatchSnapshot();
     });
@@ -247,33 +193,6 @@ describe('genHysteriaLink', () => {
     );
   });
 
-  it('emits an external proxy pin as hex pinSHA256 (not pcs)', () => {
-    const [, raw] = fixtures[0];
-    const typed = InboundSchema.parse(raw);
-    const client = (raw.settings as { clients: Array<{ auth: string }> }).clients[0];
-
-    const link = genHysteriaLink({
-      inbound: typed,
-      address: 'edge.example.com',
-      port: 8443,
-      remark: 'ep-pin',
-      clientAuth: client.auth,
-      externalProxy: {
-        forceTls: 'tls',
-        dest: 'edge.example.com',
-        port: 8443,
-        remark: 'ep-pin',
-        // base64 SHA-256 — must come out hex-normalized for Hysteria.
-        pinnedPeerCertSha256: ['yEfdI5XQl4wHgLggHEsomosoFZfUfCdfLXfT+W2N6cQ='],
-      },
-    });
-
-    const url = new URL(link);
-    expect(url.searchParams.get('pinSHA256')).toBe(
-      'c847dd2395d0978c0780b8201c4b289a8b281597d47c275f2d77d3f96d8de9c4',
-    );
-    expect(url.searchParams.has('pcs')).toBe(false);
-  });
 });
 
 describe('genWireguardLink + genWireguardConfig', () => {
@@ -345,25 +264,16 @@ describe('genWireguardLink + genWireguardConfig multi allowedIPs', () => {
   });
 });
 
-describe('resolveAddr precedence', () => {
+describe('resolveAddr', () => {
   const baseInbound = {
     listen: '',
     port: 443,
     protocol: 'vless' as const,
   };
 
-  it('prefers hostOverride over listen and fallback', () => {
+  it('uses a shareable local listen address', () => {
     expect(resolveAddr(
       { ...baseInbound, listen: '10.0.0.1' } as never,
-      'cdn.example.test',
-      'fallback.test',
-    )).toBe('cdn.example.test');
-  });
-
-  it('uses listen when override is empty and listen is explicit', () => {
-    expect(resolveAddr(
-      { ...baseInbound, listen: '10.0.0.1' } as never,
-      '',
       'fallback.test',
     )).toBe('10.0.0.1');
   });
@@ -371,7 +281,6 @@ describe('resolveAddr precedence', () => {
   it('skips listen when it is 0.0.0.0 and falls through to fallbackHostname', () => {
     expect(resolveAddr(
       { ...baseInbound, listen: '0.0.0.0' } as never,
-      '',
       'fallback.test',
     )).toBe('fallback.test');
   });
@@ -379,12 +288,10 @@ describe('resolveAddr precedence', () => {
   it('skips a unix socket path listen and falls through to fallbackHostname', () => {
     expect(resolveAddr(
       { ...baseInbound, listen: '/run/xray/in.sock' } as never,
-      '',
       'fallback.test',
     )).toBe('fallback.test');
     expect(resolveAddr(
       { ...baseInbound, listen: '@xray-abstract' } as never,
-      '',
       'fallback.test',
     )).toBe('fallback.test');
   });
@@ -392,90 +299,15 @@ describe('resolveAddr precedence', () => {
   it('falls through to fallbackHostname when listen is empty', () => {
     expect(resolveAddr(
       baseInbound as never,
-      '',
       'fallback.test',
     )).toBe('fallback.test');
   });
 
-  it('uses listen strategy with a shareable IPv6 listen before node override', () => {
+  it('normalizes a shareable IPv6 listen address', () => {
     expect(resolveAddr(
-      { ...baseInbound, listen: '[2001:db8::1]', shareAddrStrategy: 'listen', shareAddr: '' } as never,
-      'node.example.test',
+      { ...baseInbound, listen: '[2001:db8::1]' } as never,
       'fallback.test',
     )).toBe('[2001:db8::1]');
-  });
-
-  it('uses listen strategy to prefer listen and fall back to node override', () => {
-    expect(resolveAddr(
-      { ...baseInbound, listen: '10.0.0.1', shareAddrStrategy: 'listen', shareAddr: '' } as never,
-      'node.example.test',
-      'fallback.test',
-    )).toBe('10.0.0.1');
-    expect(resolveAddr(
-      { ...baseInbound, listen: '0.0.0.0', shareAddrStrategy: 'listen', shareAddr: '' } as never,
-      'node.example.test',
-      'fallback.test',
-    )).toBe('node.example.test');
-    expect(resolveAddr(
-      { ...baseInbound, listen: 'localhost', shareAddrStrategy: 'listen', shareAddr: '' } as never,
-      'node.example.test',
-      'fallback.test',
-    )).toBe('node.example.test');
-  });
-
-  it('uses custom strategy address before node override', () => {
-    expect(resolveAddr(
-      { ...baseInbound, listen: '10.0.0.1', shareAddrStrategy: 'custom', shareAddr: 'edge.example.test' } as never,
-      'node.example.test',
-      'fallback.test',
-    )).toBe('edge.example.test');
-  });
-
-  it('normalizes a bare IPv6 custom strategy address', () => {
-    expect(resolveAddr(
-      { ...baseInbound, listen: '10.0.0.1', shareAddrStrategy: 'custom', shareAddr: '2001:db8::2' } as never,
-      'node.example.test',
-      'fallback.test',
-    )).toBe('[2001:db8::2]');
-  });
-
-  it('ignores invalid custom strategy addresses and falls back to node override', () => {
-    for (const shareAddr of ['https://edge.example.test', 'edge.example.test:8443', '[2001:db8::2]:8443', 'bad host']) {
-      expect(resolveAddr(
-        { ...baseInbound, listen: '10.0.0.1', shareAddrStrategy: 'custom', shareAddr } as never,
-        'node.example.test',
-        'fallback.test',
-      )).toBe('node.example.test');
-    }
-  });
-});
-
-// #4829: reaching the panel through an SSH tunnel (127.0.0.1/localhost) must not
-// leak the loopback host into share/QR links; a configured public host wins.
-describe('preferPublicHost (loopback fallback)', () => {
-  it('keeps a routable browser host as-is even when a public host is configured', () => {
-    expect(preferPublicHost('panel.example.com', 'sub.example.com')).toBe('panel.example.com');
-    expect(preferPublicHost('203.0.113.7', 'sub.example.com')).toBe('203.0.113.7');
-  });
-
-  it('substitutes the public host for loopback browser hosts', () => {
-    for (const loop of ['127.0.0.1', 'localhost', '::1', '[::1]', '127.5.6.7']) {
-      expect(preferPublicHost(loop, 'sub.example.com')).toBe('sub.example.com');
-    }
-  });
-
-  it('leaves loopback untouched when no public host is configured', () => {
-    expect(preferPublicHost('127.0.0.1', '')).toBe('127.0.0.1');
-    expect(preferPublicHost('localhost', '')).toBe('localhost');
-  });
-
-  it('an explicit per-inbound listen still wins over the loopback fallback', () => {
-    const inbound = { listen: '203.0.113.9', port: 443, protocol: 'vless' as const };
-    expect(resolveAddr(
-      inbound as never,
-      '',
-      preferPublicHost('127.0.0.1', 'sub.example.com'),
-    )).toBe('203.0.113.9');
   });
 });
 
@@ -492,8 +324,7 @@ describe('genInboundLinks orchestrator', () => {
       const block = genInboundLinks({
         inbound: typed,
         remark: 'parity-test',
-        hostOverride: 'override.test',
-        fallbackHostname: 'fallback.test',
+        fallbackHostname: 'override.test',
       });
       expect(block).toMatchSnapshot();
     });
@@ -517,7 +348,6 @@ describe('genShadowsocksLink', () => {
         forceTls: 'same',
         remark: 'parity-test',
         clientPassword: client?.password ?? '',
-        externalProxy: null,
       });
       expect(link).toMatchSnapshot();
     });
@@ -609,55 +439,9 @@ describe('IPv6 bracket wrapping in share-link authority', () => {
   });
 });
 
-describe('external proxy pinned cert (pcs)', () => {
-  const [, raw] = fixturesForProtocol('vless').find(([name]) => name === 'vless-ws-tls')!;
-  const typed = InboundSchema.parse(raw);
-  const clientId = (raw as { settings: { clients: Array<{ id: string }> } }).settings.clients[0].id;
-
-  it('emits the external proxy pin list as pcs when forcing TLS', () => {
-    const link = genVlessLink({
-      inbound: typed,
-      address: 'edge.example.com',
-      port: 8443,
-      forceTls: 'tls',
-      remark: 'ep-pin',
-      clientId,
-      externalProxy: {
-        forceTls: 'tls',
-        dest: 'edge.example.com',
-        port: 8443,
-        remark: 'ep-pin',
-        pinnedPeerCertSha256: ['aa11', 'bb22'],
-      },
-    });
-
-    expect(new URL(link).searchParams.get('pcs')).toBe('aa11,bb22');
-  });
-
-  it('omits pcs when the external proxy forces security off', () => {
-    const link = genVlessLink({
-      inbound: typed,
-      address: 'edge.example.com',
-      port: 8080,
-      forceTls: 'none',
-      remark: 'ep-none',
-      clientId,
-      externalProxy: {
-        forceTls: 'none',
-        dest: 'edge.example.com',
-        port: 8080,
-        remark: 'ep-none',
-        pinnedPeerCertSha256: ['aa11'],
-      },
-    });
-
-    expect(new URL(link).searchParams.has('pcs')).toBe(false);
-  });
-});
-
 // #5322: the panel copy-link must carry XTLS Vision `flow` for VLESS+XHTTP
 // when VLESS encryption (vlessenc) is on, matching the form's flow display
-// and the backend subscription. Gating is via canEnableTlsFlow.
+// and the backend connection-link generator. Gating is via canEnableTlsFlow.
 describe('genVlessLink flow gating (#5322)', () => {
   function vlessXhttp(encryption: string) {
     return InboundSchema.parse({

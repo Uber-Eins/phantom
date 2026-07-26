@@ -9,23 +9,11 @@ import { isSSMultiUser } from '@/lib/xray/protocol-capabilities';
 import { setDatepicker } from '@/hooks/useDatepicker';
 import { keys } from '@/api/queryKeys';
 import { SlimInboundListSchema, LastOnlineMapSchema, InboundDetailSchema } from '@/schemas/inbound';
-import { OnlinesSchema, OnlineByNodeSchema, ActiveInboundsByNodeSchema } from '@/schemas/client';
+import { OnlinesSchema } from '@/schemas/client';
 import { DefaultsPayloadSchema, type DefaultsPayload } from '@/schemas/defaults';
 
 import type { InboundSpeedEntry } from './list/types';
 import { TRAFFIC_POLL_INTERVAL_S } from '@/lib/traffic/poll-interval';
-
-export interface SubSettings {
-  enable: boolean;
-  subTitle: string;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  // Configured public host (Sub Domain, else Web Domain) used as the share/QR
-  // link host when the panel is reached on a loopback address. Empty if neither
-  // is set.
-  publicHost: string;
-}
 
 type DBInboundInstance = InstanceType<typeof DBInbound>;
 
@@ -78,37 +66,6 @@ async function fetchOnlineClients(): Promise<string[]> {
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
 
-// Online emails grouped by the panelGuid of the node that physically hosts each
-// client, used to scope the per-inbound online rollup so a client online on one
-// node is not shown online on every node's inbounds — and a client on a
-// sub-node is attributed to that sub-node, not the node it syncs through (#4983).
-async function fetchOnlineClientsByGuid(): Promise<Record<string, string[]>> {
-  const msg = await HttpUtil.post('/panel/api/clients/onlinesByGuid', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch onlinesByGuid');
-  const validated = parseMsg(msg, OnlineByNodeSchema, 'clients/onlinesByGuid');
-  return (validated.obj && typeof validated.obj === 'object') ? (validated.obj as Record<string, string[]>) : {};
-}
-
-// Inbound tags that carried traffic recently, grouped by node (local = key 0).
-// Pairs with the per-node online map so a client attached to several inbounds
-// is only marked online on the ones that actually moved bytes — Xray's
-// user-level stat can't attribute traffic to a single inbound on its own.
-async function fetchActiveInboundsByNode(): Promise<Record<string, string[]>> {
-  const msg = await HttpUtil.post('/panel/api/clients/activeInbounds', undefined, { silent: true });
-  if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch activeInbounds');
-  const validated = parseMsg(msg, ActiveInboundsByNodeSchema, 'clients/activeInbounds');
-  return (validated.obj && typeof validated.obj === 'object') ? (validated.obj as Record<string, string[]>) : {};
-}
-
-function toGuidOnlineMap(data: Record<string, string[]>): Map<string, Set<string>> {
-  const map = new Map<string, Set<string>>();
-  for (const [key, emails] of Object.entries(data)) {
-    if (!Array.isArray(emails)) continue;
-    map.set(key, new Set(emails));
-  }
-  return map;
-}
-
 async function fetchLastOnlineMap(): Promise<Record<string, number>> {
   const msg = await HttpUtil.post('/panel/api/clients/lastOnline', undefined, { silent: true });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch lastOnline');
@@ -138,18 +95,6 @@ export function useInbounds() {
     staleTime: Infinity,
   });
 
-  const onlinesByGuidQuery = useQuery({
-    queryKey: keys.clients.onlinesByGuid(),
-    queryFn: fetchOnlineClientsByGuid,
-    staleTime: Infinity,
-  });
-
-  const activeInboundsQuery = useQuery({
-    queryKey: keys.clients.activeInbounds(),
-    queryFn: fetchActiveInboundsByNode,
-    staleTime: Infinity,
-  });
-
   const lastOnlineQuery = useQuery({
     queryKey: keys.clients.lastOnline(),
     queryFn: fetchLastOnlineMap,
@@ -165,19 +110,8 @@ export function useInbounds() {
   const defaults = defaultsQuery.data ?? {};
   const expireDiff = (defaults.expireDiff ?? 0) * 86400000;
   const trafficDiff = (defaults.trafficDiff ?? 0) * 1073741824;
-  const tgBotEnable = !!defaults.tgBotEnable;
-  const ipLimitEnable = !!defaults.ipLimitEnable;
   const pageSize = defaults.pageSize ?? 0;
   const datepicker = (defaults.datepicker as 'gregorian' | 'jalalian') || 'gregorian';
-
-  const subSettings: SubSettings = useMemo(() => ({
-    enable: !!defaults.subEnable,
-    subTitle: defaults.subTitle || '',
-    subURI: defaults.subURI || '',
-    subJsonURI: defaults.subJsonURI || '',
-    subJsonEnable: !!defaults.subJsonEnable,
-    publicHost: defaults.subDomain || defaults.webDomain || '',
-  }), [defaults.subEnable, defaults.subTitle, defaults.subURI, defaults.subJsonURI, defaults.subJsonEnable, defaults.subDomain, defaults.webDomain]);
 
   useEffect(() => {
     if (defaults.datepicker) setDatepicker(datepicker);
@@ -209,18 +143,6 @@ export function useInbounds() {
   const onlineClientsRef = useRef<string[]>([]);
   onlineClientsRef.current = onlineClients;
 
-  // Online emails keyed by the hosting node's panelGuid. The rollup reads this
-  // so each inbound only counts clients online on the node that physically
-  // hosts it, attributing a sub-node's clients to that sub-node (#4983).
-  const onlineByGuidRef = useRef<Map<string, Set<string>>>(new Map());
-
-  // Recently-active inbound tags keyed by the hosting node's panelGuid. A GUID
-  // missing from this map means "no per-inbound activity reported" (e.g. remote
-  // nodes), so the rollup leaves that node's inbounds ungated and falls back to
-  // the email signal. A present GUID gates: a client only counts online on an
-  // inbound whose tag carried traffic this window.
-  const activeByGuidRef = useRef<Map<string, Set<string>>>(new Map());
-
   const [lastOnlineMap, setLastOnlineMap] = useState<Record<string, number>>({});
 
   const rollupClients = useCallback(
@@ -237,18 +159,7 @@ export function useInbounds() {
       const comments = new Map<string, string>();
       const now = Date.now();
 
-      // Attribution key: the GUID of the node that physically hosts this
-      // inbound. Local inbounds carry the panel's own GUID (filled server-side);
-      // a node-managed inbound carries its origin node's GUID, or falls back to
-      // the master-local synthetic id for an old-build node without one (#4983).
-      const guid = dbInbound.originNodeGuid || (dbInbound.nodeId != null ? `node:${dbInbound.nodeId}` : '');
-      const nodeOnline = onlineByGuidRef.current.get(guid);
-      // A node absent from the active map reports no per-inbound activity, so
-      // leave its inbounds ungated. When present, only mark a client online on
-      // this inbound if its tag actually carried traffic — that's what stops a
-      // multi-inbound client lighting up every inbound it's attached to.
-      const activeForNode = activeByGuidRef.current.get(guid);
-      const inboundActive = activeForNode === undefined || !dbInbound.tag || activeForNode.has(dbInbound.tag);
+      const onlineSet = new Set(onlineClientsRef.current);
 
       if (dbInbound.enable) {
         const statsByEmail = new Map<string, { email: string; total: number; up: number; down: number; expiryTime: number }>();
@@ -274,7 +185,7 @@ export function useInbounds() {
             continue;
           }
           active.push(client.email);
-          if (inboundActive && nodeOnline?.has(client.email)) online.push(client.email);
+          if (onlineSet.has(client.email)) online.push(client.email);
           if (stats) {
             const expiringSoon =
               (stats.expiryTime > 0 && stats.expiryTime - now < expireDiffRef.current) ||
@@ -347,20 +258,6 @@ export function useInbounds() {
   }, [onlinesQuery.data]);
 
   useEffect(() => {
-    if (onlinesByGuidQuery.data) {
-      onlineByGuidRef.current = toGuidOnlineMap(onlinesByGuidQuery.data);
-      rebuildClientCount();
-    }
-  }, [onlinesByGuidQuery.data, rebuildClientCount]);
-
-  useEffect(() => {
-    if (activeInboundsQuery.data) {
-      activeByGuidRef.current = toGuidOnlineMap(activeInboundsQuery.data);
-      rebuildClientCount();
-    }
-  }, [activeInboundsQuery.data, rebuildClientCount]);
-
-  useEffect(() => {
     if (lastOnlineQuery.data) setLastOnlineMap(lastOnlineQuery.data);
   }, [lastOnlineQuery.data]);
 
@@ -378,8 +275,6 @@ export function useInbounds() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: keys.inbounds.root() }),
       queryClient.invalidateQueries({ queryKey: keys.clients.onlines() }),
-      queryClient.invalidateQueries({ queryKey: keys.clients.onlinesByGuid() }),
-      queryClient.invalidateQueries({ queryKey: keys.clients.activeInbounds() }),
       queryClient.invalidateQueries({ queryKey: keys.clients.lastOnline() }),
       queryClient.invalidateQueries({ queryKey: keys.xray.config() }),
     ]);
@@ -411,33 +306,18 @@ export function useInbounds() {
       if (!payload || typeof payload !== 'object') return;
       const p = payload as {
         traffics?: TrafficDelta[];
-        nodeTraffics?: TrafficDelta[];
         onlineClients?: string[];
-        onlineByGuid?: Record<string, string[]>;
-        activeInbounds?: Record<string, string[]>;
         lastOnlineMap?: Record<string, number>;
       };
       if (Array.isArray(p.onlineClients)) {
         onlineClientsRef.current = p.onlineClients;
         setOnlineClients(p.onlineClients);
       }
-      if (p.onlineByGuid && typeof p.onlineByGuid === 'object') {
-        onlineByGuidRef.current = toGuidOnlineMap(p.onlineByGuid);
-      }
-      if (p.activeInbounds && typeof p.activeInbounds === 'object') {
-        activeByGuidRef.current = toGuidOnlineMap(p.activeInbounds);
-      }
       if (p.lastOnlineMap && typeof p.lastOnlineMap === 'object') {
         setLastOnlineMap((prev) => ({ ...prev, ...p.lastOnlineMap! }));
       }
-      // Speed arrives from two independent 5s polls: the local Xray poll sends
-      // `traffics` (local inbounds) and the node sync sends `nodeTraffics` (node
-      // inbounds). Each replaces speed only within its own scope so the two don't
-      // clobber each other; an idle in-scope inbound — absent from its payload —
-      // clears instead of showing a stale value.
       const applyTraffics = (
         traffics: TrafficDelta[],
-        inScope: (ib: DBInboundInstance) => boolean,
       ) => {
         const byTag = new Map<string, TrafficDelta>();
         for (const tr of traffics) {
@@ -448,7 +328,6 @@ export function useInbounds() {
         setInboundSpeed((prev) => {
           const next = { ...prev };
           for (const ib of dbInboundsRef.current) {
-            if (!inScope(ib)) continue;
             const delta = byTag.get(ib.tag);
             if (delta) {
               next[ib.id] = {
@@ -462,8 +341,7 @@ export function useInbounds() {
           return next;
         });
       };
-      if (Array.isArray(p.traffics)) applyTraffics(p.traffics, (ib) => ib.nodeId == null);
-      if (Array.isArray(p.nodeTraffics)) applyTraffics(p.nodeTraffics, (ib) => ib.nodeId != null);
+      if (Array.isArray(p.traffics)) applyTraffics(p.traffics);
       rebuildClientCount();
     },
     [rebuildClientCount],
@@ -553,10 +431,7 @@ export function useInbounds() {
     totals,
     expireDiff,
     trafficDiff,
-    subSettings,
     datepicker,
-    tgBotEnable,
-    ipLimitEnable,
     pageSize,
     refresh,
     hydrateInbound,

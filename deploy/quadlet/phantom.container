@@ -1,0 +1,26 @@
+[Unit]
+Description=Phantom single-machine Xray panel
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=ghcr.io/uber-eins/phantom:stable
+ContainerName=phantom
+Network=host
+AutoUpdate=registry
+Volume=%h/.local/share/phantom:/etc/x-ui:Z
+Environment=TZ=Asia/Singapore
+Environment=XUI_PORT=2053
+HealthCmd=["CMD","/app/x-ui","healthcheck"]
+HealthInterval=30s
+HealthTimeout=8s
+HealthRetries=3
+HealthStartPeriod=20s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

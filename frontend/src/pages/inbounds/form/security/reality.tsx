@@ -6,7 +6,7 @@ import { RadarChartOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/
 import { FormField } from '@/components/form/rhf';
 import { UTLS_FINGERPRINT } from '@/schemas/primitives';
 import { validateRealityTarget } from '@/lib/xray/stream-wire-normalize';
-import type { RealityScanResult } from '@/generated/types';
+import type { RealityScanResult } from '@/models/reality-scan';
 import RealityTargetScannerModal from './RealityTargetScannerModal';
 
 interface RealityFormProps {

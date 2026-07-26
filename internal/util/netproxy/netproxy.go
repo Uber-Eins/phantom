@@ -1,6 +1,5 @@
 // Package netproxy builds HTTP clients that route the panel's own outbound
-// requests through an admin-configured proxy, used to reach GitHub and Telegram
-// from servers where those services are filtered.
+// requests through an administrator-selected Xray outbound.
 package netproxy
 
 import (

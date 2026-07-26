@@ -94,9 +94,6 @@ func (s *ClientService) BulkResetTraffic(inboundSvc *InboundService, emails []st
 	err := submitTrafficWrite(func() error {
 		db := database.GetDB()
 		return db.Transaction(func(tx *gorm.DB) error {
-			if err := adjustGroupBaselinesForRemovedTraffic(tx, cleanEmails); err != nil {
-				return err
-			}
 			for _, batch := range chunkStrings(cleanEmails, sqlInChunk) {
 				res := tx.Model(xray.ClientTraffic{}).
 					Where("email IN ?", batch).
@@ -105,14 +102,6 @@ func (s *ClientService) BulkResetTraffic(inboundSvc *InboundService, emails []st
 					return res.Error
 				}
 				affected += int(res.RowsAffected)
-			}
-			if err := clearGlobalTraffic(tx, cleanEmails...); err != nil {
-				return err
-			}
-			for _, batch := range chunkStrings(cleanEmails, sqlInChunk) {
-				if err := tx.Where("email IN ?", batch).Delete(&model.NodeClientTraffic{}).Error; err != nil {
-					return err
-				}
 			}
 			return nil
 		})
@@ -159,26 +148,12 @@ func (s *ClientService) resetAllClientTrafficsLocked(id int) error {
 			return nil
 		}
 
-		if err := adjustGroupBaselinesForRemovedTraffic(tx, resetEmails); err != nil {
-			return err
-		}
-
 		result := tx.Model(xray.ClientTraffic{}).
 			Where("email IN ?", resetEmails).
 			Updates(map[string]any{"enable": true, "up": 0, "down": 0})
 
 		if result.Error != nil {
 			return result.Error
-		}
-
-		if err := clearGlobalTraffic(tx, resetEmails...); err != nil {
-			return err
-		}
-
-		for _, batch := range chunkStrings(resetEmails, sqlInChunk) {
-			if err := tx.Where("email IN ?", batch).Delete(&model.NodeClientTraffic{}).Error; err != nil {
-				return err
-			}
 		}
 
 		inboundWhereText := "id "
@@ -210,10 +185,7 @@ func (s *ClientService) ResetAllTraffics() (bool, error) {
 				return res.Error
 			}
 			affected = res.RowsAffected
-			if err := tx.Where("1 = 1").Delete(&model.ClientGlobalTraffic{}).Error; err != nil {
-				return err
-			}
-			return tx.Where("1 = 1").Delete(&model.NodeClientTraffic{}).Error
+			return nil
 		})
 	})
 	if err != nil {

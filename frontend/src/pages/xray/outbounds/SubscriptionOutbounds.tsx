@@ -162,7 +162,7 @@ export default function SubscriptionOutbounds({
     { title: t('pages.xray.outbound.tag'), key: 'identity', align: 'left', render: (_v, record) => identityCell(record) },
     { title: t('pages.inbounds.address'), key: 'address', align: 'left', render: (_v, record) => addressCell(record) },
     { title: t('pages.inbounds.traffic'), key: 'traffic', align: 'left', width: 200, render: (_v, record) => trafficCell(record) },
-    { title: t('pages.nodes.latency'), key: 'testResult', align: 'left', width: 140, render: (_v, record) => latencyCell(record) },
+    { title: 'Latency', key: 'testResult', align: 'left', width: 140, render: (_v, record) => latencyCell(record) },
     { title: t('check'), key: 'test', align: 'center', width: 80, render: (_v, record) => testButton(record) },
   ];
 

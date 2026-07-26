@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-import { ExternalProxyEntrySchema } from './external-proxy';
 import { FinalMaskStreamSettingsSchema } from './finalmask';
 import { GrpcStreamSettingsSchema } from './grpc';
 import { HttpUpgradeStreamSettingsSchema } from './httpupgrade';
@@ -11,7 +10,6 @@ import { TcpStreamSettingsSchema } from './tcp';
 import { WsStreamSettingsSchema } from './ws';
 import { XHttpStreamSettingsSchema } from './xhttp';
 
-export * from './external-proxy';
 export * from './finalmask';
 export * from './grpc';
 export * from './httpupgrade';
@@ -81,7 +79,6 @@ export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>;
 // is empty. The shadow harness treats absent and empty-array as the same
 // canonical state.
 export const StreamExtrasSchema = z.object({
-  externalProxy: z.array(ExternalProxyEntrySchema).optional(),
   finalmask: FinalMaskStreamSettingsSchema.optional(),
   sockopt: SockoptStreamSettingsSchema.optional(),
 });

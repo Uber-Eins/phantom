@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
-	"os/exec"
 	"path"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,20 +59,11 @@ func allModels() []any {
 		&model.Inbound{},
 		&model.OutboundTraffics{},
 		&model.Setting{},
-		&model.InboundClientIps{},
 		&xray.ClientTraffic{},
 		&model.HistoryOfSeeders{},
-		&model.Node{},
-		&model.ApiToken{},
 		&model.ClientRecord{},
 		&model.ClientInbound{},
-		&model.ClientExternalLink{},
-		&model.ClientGroup{},
 		&model.InboundFallback{},
-		&model.Host{},
-		&model.NodeClientTraffic{},
-		&model.NodeClientIp{},
-		&model.ClientGlobalTraffic{},
 		&model.OutboundSubscription{},
 	}
 }
@@ -98,22 +86,10 @@ func initModels() error {
 	if err := dropLegacyInboundPortUnique(); err != nil {
 		return err
 	}
-	if err := migrateHostVerifyPeerCertByNameColumn(); err != nil {
-		return err
-	}
-	if err := normalizeApiTokenCreatedAtSeconds(); err != nil {
-		return err
-	}
 	if err := dropLegacyForeignKeys(); err != nil {
 		return err
 	}
 	if err := pruneOrphanedClientInbounds(); err != nil {
-		return err
-	}
-	if err := pruneOrphanedHosts(); err != nil {
-		return err
-	}
-	if err := normalizeInboundSubSortIndex(); err != nil {
 		return err
 	}
 	if err := repairOverflowedTrafficCounters(); err != nil {
@@ -206,8 +182,8 @@ func sqliteUniquePortIndexes() (autoIndexes, explicitIndexes []string, err error
 	return autoIndexes, explicitIndexes, nil
 }
 
-// dropLegacyInboundPortUnique removes the pre-multi-node UNIQUE on inbounds.port,
-// which AutoMigrate never drops and which blocks cross-node port reuse on old SQLite DBs.
+// dropLegacyInboundPortUnique removes the old UNIQUE on inbounds.port, which
+// AutoMigrate never drops. TCP and UDP inbounds may legitimately share a port.
 func dropLegacyInboundPortUnique() error {
 	if IsPostgres() {
 		return nil
@@ -285,54 +261,6 @@ func rebuildInboundsWithoutInlineUniquePort() error {
 			return err
 		}
 		return tx.Exec(`DROP TABLE inbounds_legacy_rebuild`).Error
-	})
-}
-
-func migrateHostVerifyPeerCertByNameColumn() error {
-	if !db.Migrator().HasColumn(&model.Host{}, "verify_peer_cert_by_name") {
-		return nil
-	}
-	if IsPostgres() {
-
-		var dataType string
-		if err := db.Raw(
-			`SELECT data_type FROM information_schema.columns WHERE table_name = 'hosts' AND column_name = 'verify_peer_cert_by_name'`,
-		).Scan(&dataType).Error; err != nil {
-			return err
-		}
-		if dataType != "boolean" {
-			return nil
-		}
-		if err := db.Exec(`ALTER TABLE hosts ALTER COLUMN verify_peer_cert_by_name DROP DEFAULT`).Error; err != nil {
-			return err
-		}
-		return db.Exec(`ALTER TABLE hosts ALTER COLUMN verify_peer_cert_by_name TYPE text USING ''`).Error
-	}
-
-	return db.Exec(`UPDATE hosts SET verify_peer_cert_by_name = '' WHERE verify_peer_cert_by_name IS NULL OR typeof(verify_peer_cert_by_name) <> 'text'`).Error
-}
-
-func seedHostsFromExternalProxy() error {
-	var history []string
-	if err := db.Model(&model.HistoryOfSeeders{}).Pluck("seeder_name", &history).Error; err != nil {
-		return err
-	}
-	if slices.Contains(history, "HostsFromExternalProxy") {
-		return nil
-	}
-
-	var inbounds []model.Inbound
-	if err := db.Find(&inbounds).Error; err != nil {
-		return err
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, inbound := range inbounds {
-			if _, err := CreateHostsFromExternalProxy(tx, inbound.Id, inbound.StreamSettings); err != nil {
-				return err
-			}
-		}
-		return tx.Create(&model.HistoryOfSeeders{SeederName: "HostsFromExternalProxy"}).Error
 	})
 }
 
@@ -629,113 +557,6 @@ func mtprotoInboundClientEmail(remark string, used map[string]struct{}) string {
 	}
 }
 
-// CreateHostsFromExternalProxy parses a legacy streamSettings.externalProxy array
-// and inserts one Host row per entry on tx, returning the number of rows created.
-// It is the shared core of both the one-time seedHostsFromExternalProxy startup
-// migration and the inbound-import path: an inbound exported from a build that
-// predated the hosts table carries its external proxies inline in
-// streamSettings.externalProxy, and the startup migration is gated off after its
-// first run, so a freshly imported inbound must be converted here instead. Blank
-// or malformed streamSettings, or one without externalProxy entries, is a no-op.
-func CreateHostsFromExternalProxy(tx *gorm.DB, inboundId int, streamSettings string) (int, error) {
-	if strings.TrimSpace(streamSettings) == "" {
-		return 0, nil
-	}
-	var stream map[string]any
-	if err := json.Unmarshal([]byte(streamSettings), &stream); err != nil {
-		return 0, nil
-	}
-	eps, ok := stream["externalProxy"].([]any)
-	if !ok || len(eps) == 0 {
-		return 0, nil
-	}
-	created := 0
-	for i, raw := range eps {
-		ep, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if err := tx.Create(externalProxyEntryToHost(inboundId, i, ep)).Error; err != nil {
-			return created, err
-		}
-		created++
-	}
-	return created, nil
-}
-
-func externalProxyEntryToHost(inboundId, index int, ep map[string]any) *model.Host {
-	security, _ := ep["forceTls"].(string)
-	switch security {
-	case "same", "tls", "none":
-	default:
-		security = "same"
-	}
-	dest, _ := ep["dest"].(string)
-	port := 0
-	if p, ok := ep["port"].(float64); ok {
-		port = int(p)
-	}
-	remark, _ := ep["remark"].(string)
-	if strings.TrimSpace(remark) == "" {
-		remark = "imported " + strconv.Itoa(index+1)
-	}
-	if len(remark) > 256 {
-		remark = remark[:256]
-	}
-	sni, _ := ep["sni"].(string)
-	fingerprint, _ := ep["fingerprint"].(string)
-	ech, _ := ep["echConfigList"].(string)
-	return &model.Host{
-		GroupId:              random.NumLower(16),
-		InboundId:            inboundId,
-		SortOrder:            index,
-		Remark:               remark,
-		Address:              dest,
-		Port:                 port,
-		Security:             security,
-		Sni:                  sni,
-		Fingerprint:          fingerprint,
-		Alpn:                 anyToNonEmptyStrings(ep["alpn"]),
-		PinnedPeerCertSha256: anyToNonEmptyStrings(ep["pinnedPeerCertSha256"]),
-		EchConfigList:        ech,
-	}
-}
-
-func anyToNonEmptyStrings(v any) []string {
-	switch t := v.(type) {
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, e := range t {
-			if s, ok := e.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []string:
-		out := make([]string, 0, len(t))
-		for _, s := range t {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func pruneOrphanedHosts() error {
-	res := db.Exec("DELETE FROM hosts WHERE inbound_id NOT IN (SELECT id FROM inbounds)")
-	if res.Error != nil {
-		log.Printf("Error pruning orphaned hosts rows: %v", res.Error)
-		return res.Error
-	}
-	if res.RowsAffected > 0 {
-		log.Printf("Pruned %d orphaned hosts row(s)", res.RowsAffected)
-	}
-	return nil
-}
-
 func pruneOrphanedClientInbounds() error {
 	res := db.Exec("DELETE FROM client_inbounds WHERE inbound_id NOT IN (SELECT id FROM inbounds)")
 	if res.Error != nil {
@@ -751,8 +572,7 @@ func pruneOrphanedClientInbounds() error {
 // migrateLegacySocksInboundsToMixed renames legacy socks inbounds to mixed.
 // The protocol enum dropped socks in favor of mixed (identical settings shape,
 // same behavior plus HTTP on the shared port), so rows predating the rename
-// fail model validation — most visibly when pushed to a node, where one legacy
-// inbound stalled the entire node's config and traffic sync (#5685).
+// fail model validation and prevent the local Xray config from loading.
 func migrateLegacySocksInboundsToMixed() error {
 	res := db.Exec("UPDATE inbounds SET protocol = 'mixed' WHERE protocol = 'socks'")
 	if res.Error != nil {
@@ -884,21 +704,6 @@ func migrateVmessRemovedSecurities() error {
 	return nil
 }
 
-// normalizeInboundSubSortIndex lifts sub_sort_index values below the 1-based
-// minimum (rows written by builds that defaulted the column to 0, or by nodes
-// predating the field) so they cannot sort ahead of explicitly ranked inbounds.
-func normalizeInboundSubSortIndex() error {
-	res := db.Exec("UPDATE inbounds SET sub_sort_index = 1 WHERE sub_sort_index < 1")
-	if res.Error != nil {
-		log.Printf("Error normalizing inbound sub_sort_index: %v", res.Error)
-		return res.Error
-	}
-	if res.RowsAffected > 0 {
-		log.Printf("Normalized sub_sort_index on %d inbound(s)", res.RowsAffected)
-	}
-	return nil
-}
-
 // repairOverflowedTrafficCounters heals traffic counters that historic
 // compounding bugs pushed past int64: on SQLite an overflowing INTEGER is
 // silently promoted to REAL, after which the column no longer scans into the
@@ -914,7 +719,6 @@ func repairOverflowedTrafficCounters() error {
 		{"client_traffics", []string{"up", "down"}},
 		{"inbounds", []string{"up", "down"}},
 		{"outbound_traffics", []string{"up", "down", "total"}},
-		{"node_client_traffics", []string{"up", "down"}},
 	}
 	for _, target := range targets {
 		for _, col := range target.columns {
@@ -946,11 +750,9 @@ func repairOverflowedTrafficCounters() error {
 
 // dedupeInboundSettingsClients collapses duplicate same-email entries inside
 // every inbound's settings.clients array, keeping the first occurrence.
-// Retried or raced multi-node client adds on older builds appended the same
-// client several times (#5770), which the client lists then rendered as
-// phantom duplicates. Runs on every start (idempotent, writes only changed
-// rows) because a restored backup or a not-yet-upgraded node's snapshot can
-// reintroduce duplicates.
+// Retried client adds on older builds could append the same client several
+// times (#5770), which the client lists then rendered as phantom duplicates.
+// It is idempotent and writes only changed rows.
 func dedupeInboundSettingsClients() error {
 	var inbounds []model.Inbound
 	if err := db.Find(&inbounds).Error; err != nil {
@@ -1058,13 +860,13 @@ func runSeeders(isUsersEmpty bool) error {
 	}
 
 	if empty && isUsersEmpty {
-		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "InboundClientTgIdFix2", "InboundClientSubIdFix", "FreedomFinalRulesReverseFix", "FreedomFinalRulesPrivateEgressBlock", "InboundRealityFinalmaskTcpStrip", "ApiTokensHash", "LegacyProxySettingsCleanup", "WireguardPeersToClients", "MtprotoSecretsToClients", "NodeInboundsAdopted", "ResetIpLimitNoFail2ban"}
+		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "InboundClientSubIdFix", "FreedomFinalRulesReverseFix", "FreedomFinalRulesPrivateEgressBlock", "InboundRealityFinalmaskTcpStrip", "WireguardPeersToClients", "MtprotoSecretsToClients"}
 		for _, name := range seeders {
 			if err := db.Create(&model.HistoryOfSeeders{SeederName: name}).Error; err != nil {
 				return err
 			}
 		}
-		return seedApiTokens()
+		return nil
 	}
 
 	var seedersHistory []string
@@ -1103,18 +905,6 @@ func runSeeders(isUsersEmpty bool) error {
 		}
 	}
 
-	if !slices.Contains(seedersHistory, "ApiTokensTable") {
-		if err := seedApiTokens(); err != nil {
-			return err
-		}
-	}
-
-	if !slices.Contains(seedersHistory, "ApiTokensHash") {
-		if err := hashExistingApiTokens(); err != nil {
-			return err
-		}
-	}
-
 	if !slices.Contains(seedersHistory, "ClientsTable") {
 		if err := seedClientsFromInboundJSON(); err != nil {
 			return err
@@ -1123,12 +913,6 @@ func runSeeders(isUsersEmpty bool) error {
 
 	if !slices.Contains(seedersHistory, "InboundClientsArrayFix") {
 		if err := normalizeInboundClientsArray(); err != nil {
-			return err
-		}
-	}
-
-	if !slices.Contains(seedersHistory, "InboundClientTgIdFix2") {
-		if err := normalizeInboundClientTgId(); err != nil {
 			return err
 		}
 	}
@@ -1157,31 +941,7 @@ func runSeeders(isUsersEmpty bool) error {
 		}
 	}
 
-	if !slices.Contains(seedersHistory, "LegacyProxySettingsCleanup") {
-		if err := clearLegacyProxySettings(); err != nil {
-			return err
-		}
-	}
-
-	if !slices.Contains(seedersHistory, "NodeInboundsAdopted") {
-		if err := seedNodeInboundsAdopted(); err != nil {
-			return err
-		}
-	}
-
-	if err := seedHostsFromExternalProxy(); err != nil {
-		return err
-	}
-
-	if err := resetIpLimitsWithoutFail2ban(); err != nil {
-		return err
-	}
-
 	if err := seedWireguardPeersToClients(); err != nil {
-		return err
-	}
-
-	if err := backfillEmptyHostGroupIds(); err != nil {
 		return err
 	}
 
@@ -1198,124 +958,9 @@ func runSeeders(isUsersEmpty bool) error {
 		return err
 	}
 
-	// Idempotent, not seeder-gated: bad values can re-enter via a restored
-	// backup, so re-check on every start.
+	// Idempotent, not seeder-gated: restored backups may contain a malformed
+	// panel base path.
 	return normalizeSettingPaths()
-}
-
-// seedNodeInboundsAdopted keeps the pre-existing reconcile behavior for nodes
-// that were already syncing before the inbounds_adopted_at gate was introduced.
-func seedNodeInboundsAdopted() error {
-	if err := db.Model(&model.Node{}).
-		Where("inbounds_adopted_at = 0").
-		Update("inbounds_adopted_at", time.Now().Unix()).Error; err != nil {
-		return err
-	}
-	return db.Create(&model.HistoryOfSeeders{SeederName: "NodeInboundsAdopted"}).Error
-}
-
-// backfillEmptyHostGroupIds is idempotent and not seeder-gated: builds that
-// predate group ids on the inbound-import path (and restored backups) can
-// re-introduce hosts rows with an empty group_id, and such rows render as a
-// synthetic fallback_<id> group the update/delete API cannot address, so
-// re-check on every start.
-func backfillEmptyHostGroupIds() error {
-	var hosts []*model.Host
-	if err := db.Where("group_id = '' OR group_id IS NULL").Find(&hosts).Error; err != nil {
-		return err
-	}
-	if len(hosts) == 0 {
-		return nil
-	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, h := range hosts {
-			if err := tx.Model(h).Update("group_id", random.NumLower(16)).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func resetIpLimitsWithoutFail2ban() error {
-	var history []string
-	if err := db.Model(&model.HistoryOfSeeders{}).Pluck("seeder_name", &history).Error; err != nil {
-		return err
-	}
-	if slices.Contains(history, "ResetIpLimitNoFail2ban") {
-		return nil
-	}
-
-	if fail2banCanEnforce() {
-		return db.Create(&model.HistoryOfSeeders{SeederName: "ResetIpLimitNoFail2ban"}).Error
-	}
-
-	var inbounds []model.Inbound
-	if err := db.Find(&inbounds).Error; err != nil {
-		return err
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, inbound := range inbounds {
-			if strings.TrimSpace(inbound.Settings) == "" {
-				continue
-			}
-			var settings map[string]any
-			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
-				log.Printf("ResetIpLimitNoFail2ban: skip inbound %d (invalid settings json): %v", inbound.Id, err)
-				continue
-			}
-			clients, ok := settings["clients"].([]any)
-			if !ok {
-				continue
-			}
-			mutated := false
-			for i, raw := range clients {
-				obj, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				v, present := obj["limitIp"]
-				if !present {
-					continue
-				}
-				if n, isNum := v.(float64); isNum && n == 0 {
-					continue
-				}
-				obj["limitIp"] = 0
-				clients[i] = obj
-				mutated = true
-			}
-			if !mutated {
-				continue
-			}
-			settings["clients"] = clients
-			newSettings, err := json.MarshalIndent(settings, "", "  ")
-			if err != nil {
-				log.Printf("ResetIpLimitNoFail2ban: skip inbound %d (marshal failed): %v", inbound.Id, err)
-				continue
-			}
-			if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
-				Update("settings", string(newSettings)).Error; err != nil {
-				return err
-			}
-		}
-		if err := tx.Model(&model.ClientRecord{}).Where("limit_ip <> ?", 0).
-			Update("limit_ip", 0).Error; err != nil {
-			return err
-		}
-		return tx.Create(&model.HistoryOfSeeders{SeederName: "ResetIpLimitNoFail2ban"}).Error
-	})
-}
-
-func fail2banCanEnforce() bool {
-	if v, ok := os.LookupEnv("XUI_ENABLE_FAIL2BAN"); ok && v != "true" {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	return exec.CommandContext(context.Background(), "fail2ban-client", "-h").Run() == nil
 }
 
 func clearLegacyProxySettings() error {
@@ -1329,7 +974,7 @@ func clearLegacyProxySettings() error {
 }
 
 func normalizeSettingPaths() error {
-	pathKeys := []string{"webBasePath", "subPath", "subJsonPath", "subClashPath"}
+	pathKeys := []string{"webBasePath"}
 	var rows []model.Setting
 	if err := db.Where("key IN ?", pathKeys).Find(&rows).Error; err != nil {
 		return err
@@ -1351,67 +996,6 @@ func normalizeSettingPaths() error {
 		}
 	}
 	return nil
-}
-
-func normalizeInboundClientTgId() error {
-	var inbounds []model.Inbound
-	if err := db.Find(&inbounds).Error; err != nil {
-		return err
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, inbound := range inbounds {
-			if strings.TrimSpace(inbound.Settings) == "" {
-				continue
-			}
-			var settings map[string]any
-			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
-				log.Printf("InboundClientTgIdFix: skip inbound %d (invalid settings json): %v", inbound.Id, err)
-				continue
-			}
-			clients, ok := settings["clients"].([]any)
-			if !ok {
-				continue
-			}
-			mutated := false
-			for i, raw := range clients {
-				obj, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				tgRaw, present := obj["tgId"]
-				if !present {
-					continue
-				}
-				v, isFloat := tgRaw.(float64)
-				if isFloat && !math.IsNaN(v) && !math.IsInf(v, 0) && v == math.Trunc(v) {
-					continue
-				}
-				obj["tgId"] = int64(0)
-				if s, isStr := tgRaw.(string); isStr {
-					if id, err := strconv.ParseInt(strings.ReplaceAll(strings.TrimSpace(s), " ", ""), 10, 64); err == nil {
-						obj["tgId"] = id
-					}
-				}
-				clients[i] = obj
-				mutated = true
-			}
-			if !mutated {
-				continue
-			}
-			settings["clients"] = clients
-			newSettings, err := json.MarshalIndent(settings, "", "  ")
-			if err != nil {
-				log.Printf("InboundClientTgIdFix: skip inbound %d (marshal failed): %v", inbound.Id, err)
-				continue
-			}
-			if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
-				Update("settings", string(newSettings)).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Create(&model.HistoryOfSeeders{SeederName: "InboundClientTgIdFix2"}).Error
-	})
 }
 
 func normalizeInboundClientSubId() error {
@@ -1850,47 +1434,6 @@ func seedClientsFromInboundJSON() error {
 	})
 }
 
-func seedApiTokens() error {
-	empty, err := isTableEmpty("api_tokens")
-	if err != nil {
-		return err
-	}
-	if empty {
-		var legacy model.Setting
-		err := db.Model(model.Setting{}).Where("key = ?", "apiToken").First(&legacy).Error
-		if err == nil && legacy.Value != "" {
-			row := &model.ApiToken{
-				Name:    "default",
-				Token:   legacy.Value,
-				Enabled: true,
-			}
-			if err := db.Create(row).Error; err != nil {
-				log.Printf("Error migrating legacy apiToken: %v", err)
-				return err
-			}
-		}
-	}
-	return db.Create(&model.HistoryOfSeeders{SeederName: "ApiTokensTable"}).Error
-}
-
-func hashExistingApiTokens() error {
-	var rows []*model.ApiToken
-	if err := db.Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, r := range rows {
-		if crypto.IsSHA256Hex(r.Token) {
-			continue
-		}
-		hashed := crypto.HashTokenSHA256(r.Token)
-		if err := db.Model(model.ApiToken{}).Where("id = ?", r.Id).Update("token", hashed).Error; err != nil {
-			log.Printf("Error hashing api token %d: %v", r.Id, err)
-			return err
-		}
-	}
-	return db.Create(&model.HistoryOfSeeders{SeederName: "ApiTokensHash"}).Error
-}
-
 func isTableEmpty(tableName string) (bool, error) {
 	var count int64
 	err := db.Table(tableName).Count(&count).Error
@@ -1988,13 +1531,10 @@ func InitDB(dbPath string) error {
 	if err := initUser(); err != nil {
 		return err
 	}
-	return runSeeders(isUsersEmpty)
-}
-
-func normalizeApiTokenCreatedAtSeconds() error {
-	return db.Model(&model.ApiToken{}).
-		Where("created_at >= ?", model.ApiTokenUnixMillisecondsThreshold).
-		UpdateColumn("created_at", gorm.Expr("created_at / ?", 1000)).Error
+	if err := runSeeders(isUsersEmpty); err != nil {
+		return err
+	}
+	return MigrateSingleMachine(db)
 }
 
 // openPostgresWithRetry retries the initial PostgreSQL connection with

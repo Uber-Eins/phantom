@@ -650,10 +650,10 @@ export default function OutboundsTab({
                   {t('pages.xray.outboundSub.allowPrivateHint')}
                 </div>
               </Form.Item>
-              <Form.Item label={t('pages.hosts.fields.allowInsecure')}>
+              <Form.Item label={t('pages.xray.outboundAllowInsecure')}>
                 <Switch checked={newSub.allowInsecure} onChange={(v) => setNewSub({ ...newSub, allowInsecure: v })} />
                 <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                  {t('pages.hosts.hints.allowInsecure')}
+                  {t('pages.xray.outboundAllowInsecureDesc')}
                 </div>
               </Form.Item>
               <Form.Item label={t('pages.xray.outboundSub.prepend')}>

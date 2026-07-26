@@ -54,7 +54,7 @@ body:
     attributes:
       label: Relevant logs
       description: |
-        Panel logs (`journalctl -u x-ui -n 200`) and/or the browser DevTools
+        Panel logs (`journalctl --user -u phantom.service -n 200`) and/or the browser DevTools
         console output. **Redact** tokens, real domains, IPs, and client UUIDs.
       render: shell
     validations:
@@ -71,7 +71,7 @@ body:
   - type: input
     id: xui-version
     attributes:
-      label: 3x-ui version
+      label: Phantom version
       description: Shown at the top of the panel sidebar.
       placeholder: 3.1.0
     validations:
@@ -89,12 +89,10 @@ body:
   - type: dropdown
     id: install-method
     attributes:
-      label: How did you install 3x-ui?
+      label: Deployment
       options:
-        - install.sh script
-        - Docker / Docker Compose
-        - Manual build from source
-        - Other (please describe in the bug body)
+        - Rootless Podman + Quadlet
+        - Local source build for development
     validations:
       required: true
 
@@ -116,13 +114,10 @@ body:
         - Frontend (UI / panel pages)
         - Backend (API endpoints, login, settings)
         - Xray config generation
-        - Subscription (share links / Clash / JSON)
+        - Local client share links / QR codes
         - Statistics / traffic counters
         - Database / migrations
-        - Install / upgrade script
-        - Docker image
-        - Multi-node (sub-nodes)
-        - Telegram bot
+        - OCI image / Quadlet
         - Other
     validations:
       required: false
@@ -156,7 +151,7 @@ body:
       options:
         - label: I searched [existing issues](../issues?q=is%3Aissue) and this bug has not been reported.
           required: true
-        - label: I am running the latest released version of 3x-ui (or have verified the bug still exists on it).
+        - label: I am running the latest `stable` Phantom image (or have verified the bug still exists on it).
           required: true
         - label: This bug report is written in English.
           required: true

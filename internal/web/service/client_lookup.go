@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
@@ -163,7 +162,6 @@ func (s *ClientService) List() ([]ClientWithAttachments, error) {
 			}
 			stats = append(stats, batchStats...)
 		}
-		overlayGlobalTrafficValues(db, stats)
 		for i := range stats {
 			trafficByEmail[stats[i].Email] = &stats[i]
 		}
@@ -178,17 +176,6 @@ func (s *ClientService) List() ([]ClientWithAttachments, error) {
 		})
 	}
 	return out, nil
-}
-
-func (s *ClientService) HasPendingNode(inboundSvc *InboundService, email string) bool {
-	if strings.TrimSpace(email) == "" {
-		return false
-	}
-	ids, err := s.GetInboundIdsForEmail(nil, email)
-	if err != nil {
-		return false
-	}
-	return inboundSvc.AnyNodePending(ids)
 }
 
 // findInboundIdsByClientEmail returns every inbound whose settings.clients[]

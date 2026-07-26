@@ -225,7 +225,7 @@ export function useOutboundColumns({
         },
       },
       {
-        title: t('pages.nodes.latency'),
+        title: 'Latency',
         key: 'testResult',
         align: 'left',
         width: 140,

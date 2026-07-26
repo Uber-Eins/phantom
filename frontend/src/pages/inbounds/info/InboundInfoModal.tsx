@@ -1,10 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Divider, Modal, Space, Tabs, Tag, Tooltip } from 'antd';
-import { CopyOutlined, SyncOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons';
+import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 
-import { HttpUtil, IntlUtil, SizeFormatter, ColorUtils, Wireguard } from '@/utils';
-import { activateOnKey } from '@/utils/a11y';
+import { IntlUtil, SizeFormatter, ColorUtils, Wireguard } from '@/utils';
 import { Protocols } from '@/schemas/primitives';
 import { InfinityIcon } from '@/components/ui';
 import { useDatepicker } from '@/hooks/useDatepicker';
@@ -12,7 +11,6 @@ import {
   genAllLinks,
   genWireguardConfigs,
   genWireguardLinks,
-  preferPublicHost,
 } from '@/lib/xray/inbound-link';
 import { inboundFromDb } from '@/lib/xray/inbound-from-db';
 
@@ -20,7 +18,6 @@ import {
   buildInboundInfo,
   copyText,
   downloadText,
-  formatIpInfo,
   hasShareLink,
   statsColor,
 } from './helpers';
@@ -34,10 +31,6 @@ export default function InboundInfoModal({
   clientIndex = 0,
   expireDiff = 0,
   trafficDiff = 0,
-  ipLimitEnable = false,
-  tgBotEnable = false,
-  nodeAddress = '',
-  subSettings,
   lastOnlineMap = {},
 }: InboundInfoModalProps) {
   const { t } = useTranslation();
@@ -49,55 +42,7 @@ export default function InboundInfoModal({
   const [links, setLinks] = useState<{ remark?: string; link: string }[]>([]);
   const [wireguardConfigs, setWireguardConfigs] = useState<string[]>([]);
   const [wireguardLinks, setWireguardLinks] = useState<string[]>([]);
-  const [subLink, setSubLink] = useState('');
-  const [subJsonLink, setSubJsonLink] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
-  const [clientIpsArray, setClientIpsArray] = useState<string[]>([]);
-  const [clientIpsText, setClientIpsText] = useState('');
   const [activeTab, setActiveTab] = useState('client');
-
-  const loadClientIps = useCallback(async () => {
-    if (!clientStats?.email) return;
-    setRefreshing(true);
-    try {
-      const msg = await HttpUtil.post(`/panel/api/clients/ips/${clientStats.email}`);
-      if (!msg?.success) {
-        setClientIpsText((msg?.obj as string) || 'No IP record');
-        setClientIpsArray([]);
-        return;
-      }
-      let ips: unknown = msg.obj;
-      if (typeof ips === 'string') {
-        try {
-          ips = JSON.parse(ips);
-        } catch {
-          setClientIpsText(String(ips));
-          setClientIpsArray([String(ips)]);
-          return;
-        }
-      }
-      if (ips && !Array.isArray(ips) && typeof ips === 'object') ips = [ips];
-      if (Array.isArray(ips) && ips.length > 0) {
-        const arr = (ips as unknown[]).map(formatIpInfo).filter(Boolean) as string[];
-        setClientIpsArray(arr);
-        setClientIpsText(arr.join(' | '));
-      } else {
-        setClientIpsArray([]);
-        setClientIpsText(String(ips || t('tgbot.noIpRecord')));
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  }, [clientStats, t]);
-
-  const clearClientIps = useCallback(async () => {
-    if (!clientStats?.email) return;
-    const msg = await HttpUtil.post(`/panel/api/clients/clearIps/${clientStats.email}`);
-    if (msg?.success) {
-      setClientIpsArray([]);
-      setClientIpsText(t('tgbot.noIpRecord'));
-    }
-  }, [clientStats, t]);
 
   useEffect(() => {
     if (!open || !dbInbound) return;
@@ -114,13 +59,12 @@ export default function InboundInfoModal({
     setClientStats(stats);
 
     const inboundForLinks = inboundFromDb(dbInbound);
-    const fallbackHostname = preferPublicHost(window.location.hostname, subSettings?.publicHost ?? '');
+    const fallbackHostname = window.location.hostname;
     if (info.protocol === Protocols.WIREGUARD) {
       setWireguardConfigs(
         genWireguardConfigs({
           inbound: inboundForLinks,
           remark: dbInbound.remark,
-          hostOverride: nodeAddress,
           fallbackHostname,
         }).split('\r\n'),
       );
@@ -128,7 +72,6 @@ export default function InboundInfoModal({
         genWireguardLinks({
           inbound: inboundForLinks,
           remark: dbInbound.remark,
-          hostOverride: nodeAddress,
           fallbackHostname,
         }).split('\r\n'),
       );
@@ -139,7 +82,6 @@ export default function InboundInfoModal({
           inbound: inboundForLinks,
           remark: dbInbound.remark,
           client: (clientSet ?? {}) as Parameters<typeof genAllLinks>[0]['client'],
-          hostOverride: nodeAddress,
           fallbackHostname,
         }),
       );
@@ -147,46 +89,7 @@ export default function InboundInfoModal({
       setWireguardLinks([]);
     }
 
-    if (clientSet?.subId) {
-      setSubLink((subSettings?.subURI || '') + clientSet.subId);
-      setSubJsonLink(
-        subSettings?.subJsonEnable ? (subSettings?.subJsonURI || '') + clientSet.subId : '',
-      );
-    } else {
-      setSubLink('');
-      setSubJsonLink('');
-    }
-
-    setClientIpsArray([]);
-    setClientIpsText('');
-
-    if (ipLimitEnable && (clientSet?.limitIp ?? 0) > 0 && stats?.email) {
-      void HttpUtil.post(`/panel/api/clients/ips/${stats.email}`).then((msg) => {
-        if (!msg?.success) {
-          setClientIpsText((msg?.obj as string) || 'No IP record');
-          return;
-        }
-        let ips: unknown = msg.obj;
-        if (typeof ips === 'string') {
-          try {
-            ips = JSON.parse(ips);
-          } catch {
-            setClientIpsText(String(ips));
-            setClientIpsArray([String(ips)]);
-            return;
-          }
-        }
-        if (ips && !Array.isArray(ips) && typeof ips === 'object') ips = [ips];
-        if (Array.isArray(ips) && ips.length > 0) {
-          const arr = (ips as unknown[]).map(formatIpInfo).filter(Boolean) as string[];
-          setClientIpsArray(arr);
-          setClientIpsText(arr.join(' | '));
-        } else {
-          setClientIpsText(String(ips || t('tgbot.noIpRecord')));
-        }
-      });
-    }
-  }, [open, dbInbound, clientIndex, nodeAddress, subSettings, ipLimitEnable, t]);
+  }, [open, dbInbound, clientIndex]);
 
   const isEnable = useMemo(() => {
     if (clientSettings) return !!clientSettings.enable;
@@ -229,7 +132,6 @@ export default function InboundInfoModal({
   const encryptionLabel = (inbound?.settings?.encryption as string) || '';
   const serverNameLabel = inbound?.serverName || '';
   const showClientTab = !!clientSettings;
-  const showSubscriptionTab = !!(subSettings?.enable && clientSettings?.subId);
 
   if (!dbInbound || !inbound) {
     return (
@@ -318,33 +220,6 @@ export default function InboundInfoModal({
           {clientSettings?.comment && (
             <tr><td>{t('comment')}</td><td><Tag className="info-large-tag">{clientSettings.comment}</Tag></td></tr>
           )}
-          {ipLimitEnable && (
-            <tr><td>{t('pages.inbounds.IPLimit')}</td><td><Tag>{clientSettings?.limitIp ?? 0}</Tag></td></tr>
-          )}
-          {ipLimitEnable && (clientSettings?.limitIp ?? 0) > 0 && (
-            <tr>
-              <td>{t('pages.inbounds.IPLimitlog')}</td>
-              <td>
-                <div className="ip-log">
-                  {clientIpsArray.length > 0 ? (
-                    <div>
-                      {clientIpsArray.map((item, idx) => (
-                        <Tag color="blue" className="ip-log-row" key={idx}>{item}</Tag>
-                      ))}
-                    </div>
-                  ) : (
-                    <Tag>{clientIpsText || t('tgbot.noIpRecord')}</Tag>
-                  )}
-                </div>
-                <div className="ip-log-actions">
-                  <SyncOutlined spin={refreshing} role="button" tabIndex={0} aria-label={t('refresh')} onClick={() => loadClientIps()} onKeyDown={activateOnKey(() => loadClientIps())} />
-                  <Tooltip title={t('pages.inbounds.IPLimitlogclear')}>
-                    <DeleteOutlined role="button" tabIndex={0} aria-label={t('pages.inbounds.IPLimitlogclear')} onClick={() => clearClientIps()} onKeyDown={activateOnKey(() => clearClientIps())} />
-                  </Tooltip>
-                </div>
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
 
@@ -389,18 +264,6 @@ export default function InboundInfoModal({
         </tbody>
       </table>
 
-      {tgBotEnable && clientSettings?.tgId && (
-        <>
-          <Divider>Telegram</Divider>
-          <div className="tg-row">
-            <Tag color="blue">{clientSettings.tgId}</Tag>
-            <Tooltip title={t('copy')}>
-              <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyText(clientSettings.tgId, t)} />
-            </Tooltip>
-          </div>
-        </>
-      )}
-
       {hasShareLink(dbInbound.protocol) && links.length > 0 && (
         <>
           <Divider>{t('pages.inbounds.copyLink')}</Divider>
@@ -418,31 +281,6 @@ export default function InboundInfoModal({
         </>
       )}
 
-      {showSubscriptionTab && (
-        <>
-          <Divider>{t('subscription.title')}</Divider>
-          <div className="link-panel">
-            <div className="link-panel-header">
-              <Tag color="green">{t('subscription.title')}</Tag>
-              <Tooltip title={t('copy')}>
-                <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyText(subLink, t)} />
-              </Tooltip>
-            </div>
-            <a href={subLink} target="_blank" rel="noopener noreferrer" className="link-panel-anchor">{subLink}</a>
-          </div>
-          {subSettings?.subJsonEnable && subJsonLink && (
-            <div className="link-panel">
-              <div className="link-panel-header">
-                <Tag color="green">JSON</Tag>
-                <Tooltip title={t('copy')}>
-                  <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyText(subJsonLink, t)} />
-                </Tooltip>
-              </div>
-              <a href={subJsonLink} target="_blank" rel="noopener noreferrer" className="link-panel-anchor">{subJsonLink}</a>
-            </div>
-          )}
-        </>
-      )}
     </>
   );
 

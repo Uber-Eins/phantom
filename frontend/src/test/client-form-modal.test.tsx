@@ -1,25 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import ClientFormModal from '@/pages/clients/ClientFormModal';
 import { renderWithProviders } from './test-utils';
 
-// ClientFormModal reads server state via react-query (useFail2banStatusQuery),
-// so it needs a QueryClientProvider on top of the shared ThemeProvider wrapper.
 function renderModal() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   renderWithProviders(
-    <QueryClientProvider client={queryClient}>
-      <ClientFormModal
-        open
-        mode="add"
-        client={null}
-        inbounds={[]}
-        save={vi.fn().mockResolvedValue(null)}
-        onOpenChange={() => {}}
-      />
-    </QueryClientProvider>,
+    <ClientFormModal
+      open
+      mode="add"
+      client={null}
+      inbounds={[]}
+      save={vi.fn().mockResolvedValue(null)}
+      onOpenChange={() => {}}
+    />,
   );
 }
 
@@ -41,6 +35,16 @@ function tooltipIconForLabel(label: string): HTMLElement {
 }
 
 describe('ClientFormModal credential tooltips', () => {
+  it('does not render removed group, Telegram, IP-limit, or external-link controls', () => {
+    renderModal();
+    const text = document.body.textContent ?? '';
+    expect(text).not.toContain('Telegram ID');
+    expect(text).not.toContain('IP Limit');
+    expect(text).not.toContain('Group');
+    expect(Array.from(document.querySelectorAll('.ant-tabs-tab')).map((tab) => tab.textContent?.trim()))
+      .toEqual(['Basics', 'Credentials']);
+  });
+
   it('explains that the Password field is only consumed by Trojan/Shadowsocks', async () => {
     renderModal();
     openCredentialsTab();

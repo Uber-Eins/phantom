@@ -11,7 +11,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"github.com/gin-gonic/gin"
 )
@@ -64,7 +63,6 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.GET("/list", a.getInbounds)
 	g.GET("/list/slim", a.getInboundsSlim)
 	g.GET("/options", a.getInboundOptions)
-	g.GET("/allLinks", a.getAllInboundLinks)
 	g.GET("/get/:id", a.getInbound)
 	g.GET("/:id/fallbacks", a.getFallbacks)
 
@@ -78,7 +76,6 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/resetAllTraffics", a.resetAllTraffics)
 	g.POST("/import", a.importInbound)
 	g.POST("/:id/fallbacks", a.setFallbacks)
-	g.POST("/pushClientTraffics", a.pushClientTraffics)
 }
 
 // getInbounds retrieves the list of inbounds for the logged-in user.
@@ -102,19 +99,6 @@ func (a *InboundController) getInboundsSlim(c *gin.Context) {
 		return
 	}
 	jsonObj(c, inbounds, nil)
-}
-
-// getAllInboundLinks returns every inbound's share links across all clients,
-// rendered through the same subscription engine the client pages use so the
-// remark template (name-only display part) is applied consistently.
-func (a *InboundController) getAllInboundLinks(c *gin.Context) {
-	user := session.GetLoginUser(c)
-	links, err := a.inboundService.GetAllInboundLinks(resolveHost(c), user.Id)
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
-	jsonObj(c, links, nil)
 }
 
 // getInboundOptions returns a lightweight projection of the user's inbounds
@@ -153,13 +137,6 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	}
 	user := session.GetLoginUser(c)
 	inbound.UserId = user.Id
-	// Treat NodeID=0 as "no node" — gin's *int form binding can land on
-	// 0 when the field is absent or empty, and 0 is never a valid Node
-	// row id. Without this normalization the runtime layer would try to
-	// load Node id=0 and surface "record not found".
-	if inbound.NodeID != nil && *inbound.NodeID == 0 {
-		inbound.NodeID = nil
-	}
 
 	inbound, needRestart, err := a.inboundService.AddInbound(inbound)
 	if err != nil {
@@ -233,13 +210,6 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	}
 	if !middleware.BindAndValidateInto(c, inbound) {
 		return
-	}
-	// Same NodeID=0 → nil normalisation as addInbound. UpdateInbound
-	// loads the existing row's NodeID from DB anyway (Phase 1 doesn't
-	// support migrating an inbound between nodes), but normalising here
-	// keeps the wire shape consistent.
-	if inbound.NodeID != nil && *inbound.NodeID == 0 {
-		inbound.NodeID = nil
 	}
 	inbound, needRestart, err := a.inboundService.UpdateInbound(inbound)
 	if err != nil {
@@ -354,24 +324,6 @@ func (a *InboundController) resetAllTraffics(c *gin.Context) {
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.resetAllTrafficSuccess"), nil)
 }
 
-// pushClientTraffics receives a master panel's aggregated per-client usage
-// (see InboundService.AcceptGlobalTraffic for the storage semantics).
-func (a *InboundController) pushClientTraffics(c *gin.Context) {
-	var req struct {
-		MasterGuid string                `json:"masterGuid"`
-		Traffics   []*xray.ClientTraffic `json:"traffics"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	if err := a.inboundService.AcceptGlobalTraffic(req.MasterGuid, req.Traffics); err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	jsonMsg(c, "success", nil)
-}
-
 // importInbound imports an inbound configuration from provided data.
 func (a *InboundController) importInbound(c *gin.Context) {
 	inbound := &model.Inbound{}
@@ -383,17 +335,6 @@ func (a *InboundController) importInbound(c *gin.Context) {
 	user := session.GetLoginUser(c)
 	inbound.Id = 0
 	inbound.UserId = user.Id
-	// Node IDs are panel-local and not portable across panels. Drop a node
-	// reference that is zero or that points to a node which doesn't exist on
-	// this panel, so a cross-panel export imports as a local inbound instead of
-	// failing with "record not found" when nodePushPlan looks the node up.
-	if inbound.NodeID != nil {
-		if *inbound.NodeID == 0 {
-			inbound.NodeID = nil
-		} else if exists, err := (&service.NodeService{}).NodeExists(*inbound.NodeID); err == nil && !exists {
-			inbound.NodeID = nil
-		}
-	}
 
 	for index := range inbound.ClientStats {
 		inbound.ClientStats[index].Id = 0
@@ -413,8 +354,8 @@ func (a *InboundController) importInbound(c *gin.Context) {
 	notifyClientsChanged()
 }
 
-// resolveHost mirrors what sub.SubService.ResolveRequest does for the host
-// field: prefers X-Forwarded-Host (first entry of any list, port stripped),
+// resolveHost supplies the request host used by the local share-link provider:
+// it prefers X-Forwarded-Host (first entry of any list, port stripped),
 // then X-Real-IP, then the host portion of c.Request.Host. Keeping it in the
 // controller layer means the service interface stays HTTP-agnostic — service
 // methods receive a plain host string instead of a *gin.Context.

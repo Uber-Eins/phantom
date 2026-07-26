@@ -4,6 +4,7 @@
 .cursor/
 .claude/*
 .cache/
+.config/go/telemetry/
 .sync*
 
 # Ignore log files
@@ -38,9 +39,6 @@ x-ui.db-shm
 x-ui.db-wal
 system_metrics.gob
 *.dump
-
-# Ignore Docker specific files
-docker-compose.override.yml
 
 # Ignore .env (Environment Variables) file
 .env

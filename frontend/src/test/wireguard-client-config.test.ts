@@ -24,24 +24,24 @@ const inbound: InboundOption = {
 
 describe('buildWireguardClientConfig', () => {
   it('emits the canonical PresharedKey key, not PreSharedKey', () => {
-    const cfg = buildWireguardClientConfig(client, inbound, 'example.com', '');
+    const cfg = buildWireguardClientConfig(client, inbound, 'example.com');
     expect(cfg).toContain(`PresharedKey = ${client.preSharedKey}`);
     expect(cfg).not.toContain('PreSharedKey =');
   });
 
   it('defaults DNS to 1.1.1.1, 1.0.0.1 when the inbound sets none', () => {
-    const cfg = buildWireguardClientConfig(client, inbound, 'example.com', '');
+    const cfg = buildWireguardClientConfig(client, inbound, 'example.com');
     expect(cfg).toContain('DNS = 1.1.1.1, 1.0.0.1');
   });
 
   it('uses the inbound DNS override when present', () => {
-    const cfg = buildWireguardClientConfig(client, { ...inbound, wgDns: '9.9.9.9' }, 'example.com', '');
+    const cfg = buildWireguardClientConfig(client, { ...inbound, wgDns: '9.9.9.9' }, 'example.com');
     expect(cfg).toContain('DNS = 9.9.9.9');
     expect(cfg).not.toContain('DNS = 1.1.1.1, 1.0.0.1');
   });
 
   it('builds the endpoint from host, port, MTU and server public key', () => {
-    const cfg = buildWireguardClientConfig(client, inbound, 'example.com', '');
+    const cfg = buildWireguardClientConfig(client, inbound, 'example.com');
     expect(cfg).toContain('Endpoint = example.com:51820');
     expect(cfg).toContain('MTU = 1420');
     expect(cfg).toContain(`PublicKey = ${inbound.wgPublicKey}`);
@@ -49,44 +49,12 @@ describe('buildWireguardClientConfig', () => {
   });
 
   it('omits the PresharedKey line when the client has no preshared key', () => {
-    const cfg = buildWireguardClientConfig({ ...client, preSharedKey: undefined }, inbound, 'example.com', '');
+    const cfg = buildWireguardClientConfig({ ...client, preSharedKey: undefined }, inbound, 'example.com');
     expect(cfg).not.toContain('PresharedKey');
   });
 
-  it('uses the hosting node address as the endpoint host for node-managed inbounds', () => {
-    const cfg = buildWireguardClientConfig(client, { ...inbound, nodeAddress: 'node.example.net' }, 'master.example.com', '');
-    expect(cfg).toContain('Endpoint = node.example.net:51820');
-    expect(cfg).not.toContain('master.example.com');
-  });
-
-  it('falls back to the panel host when the node address is blank', () => {
-    const cfg = buildWireguardClientConfig(client, { ...inbound, nodeAddress: '   ' }, 'master.example.com', '');
-    expect(cfg).toContain('Endpoint = master.example.com:51820');
-  });
-
-  it('honors the custom share-address strategy over the node address', () => {
-    const cfg = buildWireguardClientConfig(
-      client,
-      { ...inbound, nodeAddress: 'node.example.net', shareAddrStrategy: 'custom', shareAddr: 'vpn.example.com' },
-      'master.example.com',
-      '',
-    );
-    expect(cfg).toContain('Endpoint = vpn.example.com:51820');
-  });
-
-  it('honors the listen share-address strategy over the node address', () => {
-    const cfg = buildWireguardClientConfig(
-      client,
-      { ...inbound, nodeAddress: 'node.example.net', shareAddrStrategy: 'listen', listen: '198.51.100.7' },
-      'master.example.com',
-      '',
-    );
-    expect(cfg).toContain('Endpoint = 198.51.100.7:51820');
-  });
-
-  it('keeps a panel hostname that fails share-host normalization instead of emitting an empty endpoint', () => {
-    const cfg = buildWireguardClientConfig(client, { ...inbound, listen: '0.0.0.0' }, 'wg_gw.corp.lan', '');
-    expect(cfg).toContain('Endpoint = wg_gw.corp.lan:51820');
-    expect(cfg).not.toContain('Endpoint = :51820');
+  it('brackets an IPv6 request host in the endpoint', () => {
+    const cfg = buildWireguardClientConfig(client, inbound, '2001:db8::1');
+    expect(cfg).toContain('Endpoint = [2001:db8::1]:51820');
   });
 });

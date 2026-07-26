@@ -220,8 +220,8 @@ export default function RuleFormModal({
                 <InputAddon>{`${idx + 1}`}</InputAddon>
                 <Input
                   value={attr[0]}
-                  aria-label={t('pages.nodes.name')}
-                  placeholder={t('pages.nodes.name')}
+                  aria-label={t('pages.inbounds.stream.general.name')}
+                  placeholder={t('pages.inbounds.stream.general.name')}
                   onChange={(e) => {
                     const next = attrs.map((a, i) => (i === idx ? ([e.target.value, a[1]] as [string, string]) : a));
                     methods.setValue('attrs', next);

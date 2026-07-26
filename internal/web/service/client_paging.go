@@ -11,7 +11,7 @@ import (
 )
 
 // ClientSlim is the row-shape used by the clients page. It drops fields the
-// table never reads (UUID, password, auth, flow, security, reverse, tgId)
+// table never reads (UUID, password, auth, flow, security, reverse)
 // so the list payload stays compact even when the panel manages thousands
 // of clients. Modals that need the full record still call /get/:email.
 type ClientSlim struct {
@@ -20,9 +20,7 @@ type ClientSlim struct {
 	Enable     bool                `json:"enable"`
 	TotalGB    int64               `json:"totalGB"`
 	ExpiryTime int64               `json:"expiryTime"`
-	LimitIP    int                 `json:"limitIp"`
 	Reset      int                 `json:"reset"`
-	Group      string              `json:"group,omitempty"`
 	Comment    string              `json:"comment,omitempty"`
 	InboundIds []int               `json:"inboundIds"`
 	Traffic    *xray.ClientTraffic `json:"traffic,omitempty"`
@@ -52,9 +50,7 @@ type ClientPageParams struct {
 	UsageFrom  int64  `form:"usageFrom"`
 	UsageTo    int64  `form:"usageTo"`
 	AutoRenew  string `form:"autoRenew"`
-	HasTgID    string `form:"hasTgId"`
 	HasComment string `form:"hasComment"`
-	Group      string `form:"group"`
 }
 
 // ClientPageResponse is the shape returned by ListPaged. `Total` is the
@@ -69,7 +65,6 @@ type ClientPageResponse struct {
 	Page     int            `json:"page"`
 	PageSize int            `json:"pageSize"`
 	Summary  ClientsSummary `json:"summary"`
-	Groups   []string       `json:"groups"`
 }
 
 // ClientsSummary collects per-bucket counts plus the matching email lists so
@@ -173,13 +168,7 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 		if !clientMatchesAutoRenew(c, params.AutoRenew) {
 			continue
 		}
-		if !clientMatchesHasTgID(c, params.HasTgID) {
-			continue
-		}
 		if !clientMatchesHasComment(c, params.HasComment) {
-			continue
-		}
-		if !clientMatchesAnyGroup(c, params.Group) {
 			continue
 		}
 		filtered = append(filtered, c)
@@ -203,15 +192,6 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 		items = append(items, toClientSlim(c))
 	}
 
-	groupRows, gErr := s.ListGroups()
-	if gErr != nil {
-		return nil, gErr
-	}
-	groups := make([]string, 0, len(groupRows))
-	for _, g := range groupRows {
-		groups = append(groups, g.Name)
-	}
-
 	return &ClientPageResponse{
 		Items:    items,
 		Total:    total,
@@ -219,7 +199,6 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 		Page:     page,
 		PageSize: pageSize,
 		Summary:  summary,
-		Groups:   groups,
 	}, nil
 }
 
@@ -269,9 +248,7 @@ func toClientSlim(c ClientWithAttachments) ClientSlim {
 		Enable:     c.Enable,
 		TotalGB:    c.TotalGB,
 		ExpiryTime: c.ExpiryTime,
-		LimitIP:    c.LimitIP,
 		Reset:      c.Reset,
-		Group:      c.Group,
 		Comment:    c.Comment,
 		InboundIds: c.InboundIds,
 		Traffic:    c.Traffic,
@@ -289,9 +266,6 @@ func clientMatchesSearch(c ClientWithAttachments, needle string) bool {
 		if v != "" && strings.Contains(strings.ToLower(v), needle) {
 			return true
 		}
-	}
-	if c.TgID != 0 && strings.Contains(strconv.FormatInt(c.TgID, 10), needle) {
-		return true
 	}
 	return false
 }
@@ -420,16 +394,6 @@ func clientMatchesAutoRenew(c ClientWithAttachments, mode string) bool {
 	return true
 }
 
-func clientMatchesHasTgID(c ClientWithAttachments, mode string) bool {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "yes":
-		return c.TgID != 0
-	case "no":
-		return c.TgID == 0
-	}
-	return true
-}
-
 func clientMatchesHasComment(c ClientWithAttachments, mode string) bool {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "yes":
@@ -438,26 +402,6 @@ func clientMatchesHasComment(c ClientWithAttachments, mode string) bool {
 		return strings.TrimSpace(c.Comment) == ""
 	}
 	return true
-}
-
-func clientMatchesAnyGroup(c ClientWithAttachments, csv string) bool {
-	groups := parseCSVStrings(csv)
-	if len(groups) == 0 {
-		return true
-	}
-	current := strings.TrimSpace(c.Group)
-	for _, g := range groups {
-		if g == "" {
-			if current == "" {
-				return true
-			}
-			continue
-		}
-		if strings.EqualFold(g, current) {
-			return true
-		}
-	}
-	return false
 }
 
 func clientMatchesBucket(c ClientWithAttachments, bucket string, onlineSet map[string]struct{}, nowMs, expireDiffMs, trafficDiffBytes int64) bool {

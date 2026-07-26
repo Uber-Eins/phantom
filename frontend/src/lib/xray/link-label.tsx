@@ -2,9 +2,8 @@ import { Tag } from 'antd';
 import { Base64 } from '@/utils';
 
 /* Shared parsing + rendering for the "protocol / transport / security"
-   labels shown above share links in the QR modal, the client info modal
-   and the subscription page. Keeping it in one place means the colour
-   scheme and the email/stats stripping stay identical across all three. */
+   labels shown above connection links in the QR and client info modals.
+   Keeping it in one place keeps the colour scheme identical. */
 
 export interface LinkParts {
   protocol: string;
@@ -56,9 +55,8 @@ const TAG_STYLE = { marginInlineEnd: 0, fontWeight: 600, letterSpacing: '0.3px' 
    `net`/`tls`/`ps`/`port`. Returns null when the scheme is unknown or the
    payload can't be parsed, so callers fall back to "Link N".
 
-   The remark is shown verbatim: the panel displays the subscription's clean
-   (name-only) remarks — the per-client traffic/expiry info is rendered only
-   into the body a client app imports, so there is nothing to strip here. */
+   The remark is shown verbatim because authenticated panel links contain only
+   the inbound and client names. */
 export function parseLinkParts(link: string): LinkParts | null {
   const trimmed = link.trim();
   const scheme = /^([a-z0-9]+):\/\//i.exec(trimmed)?.[1]?.toLowerCase() ?? '';

@@ -10,8 +10,8 @@ import (
 )
 
 // applyClientRecordMerge merges incoming client-record fields onto row using the
-// same rules everywhere a client record is persisted: scalar quota / lifecycle /
-// subscription fields are applied unconditionally (so clearing them takes
+// same rules everywhere a client record is persisted: scalar quota, lifecycle,
+// and stable sharing fields are applied unconditionally (so clearing them takes
 // effect), while credentials and identifiers are only overwritten when the
 // incoming value is non-empty (so a partial update preserves the stored UUID /
 // password / keys). CreatedAt keeps the earliest known value. Email, UpdatedAt,
@@ -53,14 +53,9 @@ func applyClientRecordMerge(row *model.ClientRecord, incoming *model.ClientRecor
 	row.PreSharedKey = incoming.PreSharedKey
 	row.KeepAlive = incoming.KeepAlive
 	row.SubID = incoming.SubID
-	row.LimitIP = incoming.LimitIP
 	row.TotalGB = incoming.TotalGB
 	row.ExpiryTime = incoming.ExpiryTime
 	row.Enable = incoming.Enable
-	row.TgID = incoming.TgID
-	if incoming.Group != "" {
-		row.Group = incoming.Group
-	}
 	row.Comment = incoming.Comment
 	row.Reset = incoming.Reset
 	if incoming.CreatedAt > 0 && (row.CreatedAt == 0 || incoming.CreatedAt < row.CreatedAt) {
@@ -202,37 +197,6 @@ func (s *ClientService) ListForInbound(tx *gorm.DB, inboundId int) ([]model.Clie
 		Select("clients.*, client_inbounds.flow_override AS flow_override").
 		Joins("JOIN client_inbounds ON client_inbounds.client_id = clients.id").
 		Where("client_inbounds.inbound_id = ?", inboundId).
-		Order("clients.id ASC").
-		Find(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]model.Client, 0, len(rows))
-	for i := range rows {
-		c := rows[i].ToClient()
-		c.Flow = rows[i].FlowOverride
-		out = append(out, *c)
-	}
-	return out, nil
-}
-
-// ListForInboundBySubId is ListForInbound narrowed to one subscription id —
-// both filter columns are indexed, so the subscription server resolves a
-// subscriber's clients without touching the inbound's settings JSON.
-func (s *ClientService) ListForInboundBySubId(tx *gorm.DB, inboundId int, subId string) ([]model.Client, error) {
-	if tx == nil {
-		tx = database.GetDB()
-	}
-	type joinedRow struct {
-		model.ClientRecord
-		FlowOverride string
-	}
-	var rows []joinedRow
-	err := tx.Table("clients").
-		Select("clients.*, client_inbounds.flow_override AS flow_override").
-		Joins("JOIN client_inbounds ON client_inbounds.client_id = clients.id").
-		Where("client_inbounds.inbound_id = ? AND clients.sub_id = ?", inboundId, subId).
 		Order("clients.id ASC").
 		Find(&rows).Error
 	if err != nil {

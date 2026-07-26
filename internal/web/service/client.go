@@ -1,8 +1,8 @@
 // Package service implements the panel's business-logic layer.
 //
 // ClientService owns the lifecycle of VPN clients: creation, update, deletion,
-// attach/detach to inbounds, bulk operations, group membership, traffic resets,
-// and the paginated clients listing. Its surface is split across client_*.go
+// attach/detach to inbounds, bulk operations, traffic resets, and the paginated
+// clients listing. Its surface is split across client_*.go
 // files by responsibility (see each file's contents); they all belong to the
 // same package, so the split is purely organizational. ClientService and
 // InboundService are mutually dependent — most ClientService methods take an

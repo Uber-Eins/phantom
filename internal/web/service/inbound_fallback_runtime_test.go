@@ -9,9 +9,8 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 )
 
-// TestBuildRuntimeInboundForAPI_InjectsFallbacks is the #5963 regression: the
-// runtime inbound sent to nodes never carried the inbound_fallbacks rows, so
-// fallbacks configured on the master silently vanished from every node.
+// TestBuildRuntimeInboundForAPI_InjectsFallbacks verifies that the runtime
+// inbound sent to the local Xray process carries the master's fallback rows.
 func TestBuildRuntimeInboundForAPI_InjectsFallbacks(t *testing.T) {
 	setupBulkDB(t)
 	svc := &InboundService{}

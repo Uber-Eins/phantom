@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
@@ -53,20 +51,11 @@ func (s *InboundService) MigrationRequirements() {
 			return
 		}
 	}
-	if err = normalizeInboundShareAddressColumns(tx); err != nil {
-		return
-	}
-
 	// Normalize "enable" columns to boolean on Postgres. Legacy SQLite data
-	// (0/1 integers), partial migrations, or mixed write paths (public API
-	// inbound updates that flow through UpdateClientStat + client syncs, plus
-	// node traffic merge deltas) can leave the column as integer or with mixed
+	// (0/1 integers), partial migrations, or historical mixed write paths can
+	// leave the column as integer or with mixed
 	// interpretation. This (combined with the dialect-aware
-	// ClientTrafficEnableMergeExpr) prevents type problems in the node traffic
-	// sync merge (SetRemoteTraffic) and makes the sync robust even when
-	// inbounds are updated via the public API (incl. ones carrying
-	// externalProxy in streamSettings). The same expression is also safe on
-	// SQLite (no PG :: casts).
+	// ClientTrafficEnableMergeExpr) prevents type problems in traffic updates.
 	if database.IsPostgres() {
 		// Use DO block so it is idempotent and doesn't fail if already boolean.
 		normalizeBool := func(table, col string) {
@@ -85,9 +74,7 @@ func (s *InboundService) MigrationRequirements() {
 		}
 		normalizeBool("inbounds", "enable")
 		normalizeBool("client_traffics", "enable")
-		normalizeBool("nodes", "enable")
 		normalizeBool("clients", "enable")
-		normalizeBool("api_tokens", "enabled")
 		normalizeBool("outbound_subscriptions", "enabled")
 	}
 
@@ -116,16 +103,9 @@ func (s *InboundService) MigrationRequirements() {
 					c["email"] = ""
 				}
 
-				// Convert string tgId to int64
-				if _, ok := c["tgId"]; ok {
-					tgId := c["tgId"]
-					if tgIdStr, ok2 := tgId.(string); ok2 {
-						tgIdInt64, err := strconv.ParseInt(strings.ReplaceAll(tgIdStr, " ", ""), 10, 64)
-						if err == nil {
-							c["tgId"] = tgIdInt64
-						}
-					}
-				}
+				delete(c, "group")
+				delete(c, "tgId")
+				delete(c, "limitIp")
 
 				// Remove "flow": "xtls-rprx-direct"
 				if _, ok := c["flow"]; ok {
@@ -186,54 +166,6 @@ func (s *InboundService) MigrationRequirements() {
 
 	// Remove orphaned traffics
 	tx.Where("inbound_id = 0").Delete(xray.ClientTraffic{})
-
-	// Migrate old MultiDomain to External Proxy
-	var externalProxy []struct {
-		Id             int
-		Port           int
-		StreamSettings string // text column on both DBs; safer than []byte for cross-DB scan
-	}
-	externalProxyQuery := `select id, port, stream_settings
-	from inbounds
-	WHERE protocol in ('vmess','vless','trojan')
-	  AND json_extract(stream_settings, '$.security') = 'tls'
-	  AND json_extract(stream_settings, '$.tlsSettings.settings.domains') IS NOT NULL`
-	if database.IsPostgres() {
-		externalProxyQuery = `select id, port, stream_settings
-	from inbounds
-	WHERE protocol in ('vmess','vless','trojan')
-	  AND NULLIF(stream_settings, '')::jsonb #>> '{security}' = 'tls'
-	  AND NULLIF(stream_settings, '')::jsonb #> '{tlsSettings,settings,domains}' IS NOT NULL`
-	}
-	err = tx.Raw(externalProxyQuery).Scan(&externalProxy).Error
-	if err != nil || len(externalProxy) == 0 {
-		return
-	}
-
-	for _, ep := range externalProxy {
-		var reverses any
-		var stream map[string]any
-		_ = json.Unmarshal([]byte(ep.StreamSettings), &stream)
-		if tlsSettings, ok := stream["tlsSettings"].(map[string]any); ok {
-			if settings, ok := tlsSettings["settings"].(map[string]any); ok {
-				if domains, ok := settings["domains"].([]any); ok {
-					for _, domain := range domains {
-						if domainMap, ok := domain.(map[string]any); ok {
-							domainMap["forceTls"] = "same"
-							domainMap["port"] = ep.Port
-							domainMap["dest"] = domainMap["domain"].(string)
-							delete(domainMap, "domain")
-						}
-					}
-				}
-				reverses = settings["domains"]
-				delete(settings, "domains")
-			}
-		}
-		stream["externalProxy"] = reverses
-		newStream, _ := json.MarshalIndent(stream, " ", "  ")
-		tx.Model(model.Inbound{}).Where("id = ?", ep.Id).Update("stream_settings", newStream)
-	}
 
 	// Legacy tag cleanup for old auto-generated tags (e.g. "0.0.0.0:443-...").
 	// Must be cross-DB: INSTR/REPLACE work on SQLite; Postgres needs position().

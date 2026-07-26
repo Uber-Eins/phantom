@@ -184,17 +184,9 @@ func (s *ClientService) DeleteOrphans() (int, error) {
 			emails = append(emails, rows[i].Email)
 		}
 	}
-	tombstoneClientEmails(emails)
-
 	if err := runSerializedTx(func(tx *gorm.DB) error {
-		if e := adjustGroupBaselinesForRemovedTraffic(tx, emails); e != nil {
-			return e
-		}
 		for _, batch := range chunkInts(ids, sqlInChunk) {
 			if e := tx.Where("client_id IN ?", batch).Delete(&model.ClientInbound{}).Error; e != nil {
-				return e
-			}
-			if e := tx.Where("client_id IN ?", batch).Delete(&model.ClientExternalLink{}).Error; e != nil {
 				return e
 			}
 		}
@@ -203,12 +195,6 @@ func (s *ClientService) DeleteOrphans() (int, error) {
 				if e := tx.Where("email IN ?", batch).Delete(&xray.ClientTraffic{}).Error; e != nil {
 					return e
 				}
-				if e := tx.Where("client_email IN ?", batch).Delete(&model.InboundClientIps{}).Error; e != nil {
-					return e
-				}
-			}
-			if e := clearGlobalTraffic(tx, emails...); e != nil {
-				return e
 			}
 		}
 		for _, batch := range chunkInts(ids, sqlInChunk) {

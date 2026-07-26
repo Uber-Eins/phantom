@@ -1,0 +1,13 @@
+.git
+.github
+.config
+AGENTS.md
+CLAUDE.md
+docs
+deploy
+frontend/node_modules
+frontend/storybook-static
+internal/web/dist
+*.db
+*.dump
+*.log

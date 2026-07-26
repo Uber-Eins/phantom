@@ -2,8 +2,6 @@ package controller
 
 import (
 	"errors"
-	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
@@ -11,7 +9,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/web/entity"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/middleware"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/email"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 
@@ -33,23 +30,15 @@ type updateUserForm struct {
 // "unchanged", so clearing needs its own signal — see #5724).
 type updateSettingForm struct {
 	entity.AllSetting
-	TwoFactorCode     string `json:"twoFactorCode" form:"twoFactorCode"`
-	ClearTgBotToken   bool   `json:"clearTgBotToken" form:"clearTgBotToken"`
-	ClearLdapPassword bool   `json:"clearLdapPassword" form:"clearLdapPassword"`
-	ClearSmtpPassword bool   `json:"clearSmtpPassword" form:"clearSmtpPassword"`
-}
-
-type validateRegexForm struct {
-	Regex string `json:"regex" form:"regex"`
+	TwoFactorCode string `json:"twoFactorCode" form:"twoFactorCode"`
 }
 
 // SettingController handles settings and user management operations.
 type SettingController struct {
-	settingService  service.SettingService
-	userService     panel.UserService
-	panelService    panel.PanelService
-	apiTokenService panel.ApiTokenService
-	xrayService     service.XrayService
+	settingService service.SettingService
+	userService    panel.UserService
+	panelService   panel.PanelService
+	xrayService    service.XrayService
 }
 
 // NewSettingController creates a new SettingController and initializes its routes.
@@ -66,29 +55,9 @@ func (a *SettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/all", a.getAllSetting)
 	g.POST("/defaultSettings", a.getDefaultSettings)
 	g.POST("/update", a.updateSetting)
-	g.POST("/validateRegex", a.validateRegex)
 	g.POST("/updateUser", a.updateUser)
 	g.POST("/restartPanel", a.restartPanel)
 	g.GET("/getDefaultJsonConfig", a.getDefaultXrayConfig)
-	g.GET("/apiTokens", a.listApiTokens)
-	g.POST("/apiTokens/create", a.createApiToken)
-	g.POST("/apiTokens/delete/:id", a.deleteApiToken)
-	g.POST("/apiTokens/setEnabled/:id", a.setApiTokenEnabled)
-	g.POST("/testSmtp", a.testSmtp)
-	g.POST("/testTgBot", a.testTgBot)
-}
-
-func (a *SettingController) validateRegex(c *gin.Context) {
-	form := &validateRegexForm{}
-	if err := c.ShouldBind(form); err != nil {
-		pureJsonMsg(c, http.StatusOK, false, err.Error())
-		return
-	}
-	if err := service.ValidateRegex(form.Regex); err != nil {
-		pureJsonMsg(c, http.StatusOK, false, err.Error())
-		return
-	}
-	pureJsonMsg(c, http.StatusOK, true, "")
 }
 
 // getAllSetting retrieves all current settings as the browser-safe view:
@@ -121,21 +90,13 @@ func (a *SettingController) updateSetting(c *gin.Context) {
 	allSetting := &form.AllSetting
 	oldTwoFactor, twoFactorErr := a.settingService.GetTwoFactorEnable()
 	oldPanelOutbound, _ := a.settingService.GetPanelOutbound()
-	oldTgEnable, _ := a.settingService.GetTgbotEnabled()
-	oldTgToken, _ := a.settingService.GetTgBotToken()
-	oldTgChatId, _ := a.settingService.GetTgBotChatId()
-	oldTgAPIServer, _ := a.settingService.GetTgBotAPIServer()
 	if twoFactorErr == nil && oldTwoFactor && !allSetting.TwoFactorEnable {
 		if err := a.settingService.VerifyTwoFactorCode(form.TwoFactorCode); err != nil {
 			jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
 			return
 		}
 	}
-	err := a.settingService.UpdateAllSetting(allSetting, service.SecretClears{
-		TgBotToken:   form.ClearTgBotToken,
-		LdapPassword: form.ClearLdapPassword,
-		SmtpPassword: form.ClearSmtpPassword,
-	})
+	err := a.settingService.UpdateAllSetting(allSetting)
 	if err == nil && twoFactorErr == nil && !oldTwoFactor && allSetting.TwoFactorEnable {
 		if bumpErr := a.userService.BumpLoginEpoch(); bumpErr != nil {
 			err = bumpErr
@@ -147,16 +108,6 @@ func (a *SettingController) updateSetting(c *gin.Context) {
 		// hot-appliable, so this normally does not restart Xray.
 		if applyErr := a.xrayService.RestartXray(false); applyErr != nil {
 			logger.Warning("apply panel outbound change failed:", applyErr)
-		}
-	}
-	// UpdateAllSetting already restored a redacted-blank token, so allSetting.TgBotToken is the effective value to compare.
-	if err == nil && reloadTgbotFunc != nil {
-		tgChanged := oldTgEnable != allSetting.TgBotEnable ||
-			(allSetting.TgBotEnable && (oldTgToken != allSetting.TgBotToken ||
-				oldTgChatId != allSetting.TgBotChatId ||
-				oldTgAPIServer != allSetting.TgBotAPIServer))
-		if tgChanged {
-			reloadTgbotFunc()
 		}
 	}
 	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
@@ -209,117 +160,3 @@ func (a *SettingController) getDefaultXrayConfig(c *gin.Context) {
 	}
 	jsonObj(c, defaultJsonConfig, nil)
 }
-
-type apiTokenCreateForm struct {
-	Name string `json:"name" form:"name"`
-}
-
-type apiTokenEnabledForm struct {
-	Enabled bool `json:"enabled" form:"enabled"`
-}
-
-func (a *SettingController) listApiTokens(c *gin.Context) {
-	rows, err := a.apiTokenService.List()
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.getSettings"), err)
-		return
-	}
-	jsonObj(c, rows, nil)
-}
-
-func (a *SettingController) createApiToken(c *gin.Context) {
-	form := &apiTokenCreateForm{}
-	if err := c.ShouldBind(form); err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
-		return
-	}
-	row, err := a.apiTokenService.Create(form.Name)
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
-		return
-	}
-	jsonObj(c, row, nil)
-}
-
-func (a *SettingController) deleteApiToken(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
-		return
-	}
-	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), a.apiTokenService.Delete(id))
-}
-
-func (a *SettingController) setApiTokenEnabled(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
-		return
-	}
-	form := &apiTokenEnabledForm{}
-	if bindErr := c.ShouldBind(form); bindErr != nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), bindErr)
-		return
-	}
-	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), a.apiTokenService.SetEnabled(id, form.Enabled))
-}
-
-func (a *SettingController) testSmtp(c *gin.Context) {
-	if emailService == nil {
-		jsonMsg(c, I18nWeb(c, "pages.settings.smtpNotInitialized"), errors.New("email service not available"))
-		return
-	}
-	logger.Info("SMTP test: starting...")
-	result := emailService.TestConnection()
-	if !result.Success {
-		logger.Warning("SMTP test failed at", result.Stage+":", result.Message)
-		c.JSON(200, gin.H{
-			"success": false,
-			"stage":   result.Stage,
-			"msg":     result.Message,
-		})
-		return
-	}
-	logger.Info("SMTP test: success")
-	c.JSON(200, gin.H{
-		"success": true,
-		"stage":   result.Stage,
-		"msg":     result.Message,
-	})
-}
-
-func (a *SettingController) testTgBot(c *gin.Context) {
-	enabled, err := a.settingService.GetTgbotEnabled()
-	if err != nil || !enabled {
-		jsonMsg(c, I18nWeb(c, "pages.settings.tgBotNotEnabled"), errors.New("telegram bot disabled"))
-		return
-	}
-	// Import tgbot package would create a circular dependency, so we call
-	// the test through the global function registered at startup.
-	if testTgFunc != nil {
-		if err := testTgFunc(); err != nil {
-			jsonMsg(c, I18nWeb(c, "pages.settings.tgTestFailed")+": "+err.Error(), err)
-			return
-		}
-		jsonMsg(c, I18nWeb(c, "pages.settings.tgTestSuccess"), nil)
-		return
-	}
-	jsonMsg(c, I18nWeb(c, "pages.settings.tgBotNotRunning"), errors.New("bot not started"))
-}
-
-// testTgFunc is set from web layer to test Telegram sending without circular imports.
-var testTgFunc func() error
-
-// SetTestTgFunc registers the function used to test Telegram sending.
-func SetTestTgFunc(fn func() error) { testTgFunc = fn }
-
-// reloadTgbotFunc is wired from the web layer; importing tgbot here would be a circular dependency.
-var reloadTgbotFunc func()
-
-func SetReloadTgbotFunc(fn func()) { reloadTgbotFunc = fn }
-
-// emailService is set from web layer.
-var emailService *email.EmailService
-
-// SetEmailService registers the email service for test endpoints.
-func SetEmailService(s *email.EmailService) { emailService = s }

@@ -456,10 +456,8 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 				"wg_allowed_ips":    merged.AllowedIPs,
 				"wg_pre_shared_key": merged.PreSharedKey,
 				"wg_keep_alive":     merged.KeepAlive,
-				"limit_ip":          merged.LimitIP,
 				"total_gb":          merged.TotalGB,
 				"expiry_time":       merged.ExpiryTime,
-				"tg_id":             merged.TgID,
 				"comment":           merged.Comment,
 				"reset":             merged.Reset,
 			}).Error; err != nil {
@@ -479,21 +477,9 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 		return needRestart, err
 	}
 
-	// Persist the group explicitly. SyncInbound deliberately preserves the
-	// stored group when the inbound settings carry none — so a node snapshot or a
-	// group-less settings rebuild can't wipe it (see SyncInbound + its tests).
-	// That guard also meant clearing the group in the client editor never took
-	// effect. The editor always round-trips the field, so apply it here,
-	// including the empty string that removes the client from its group.
-	if err := database.GetDB().Model(&model.ClientRecord{}).
-		Where("id = ?", id).
-		UpdateColumn("group_name", updated.Group).Error; err != nil {
-		return needRestart, err
-	}
-
-	// Same shape as the group write above: SyncInbound keeps a stored ad-tag
-	// when the incoming settings carry none, so clearing the override must be
-	// applied here, where the editor always round-trips the field.
+	// SyncInbound keeps a stored ad-tag when the incoming settings carry none,
+	// so clearing the override must be applied here, where the editor always
+	// round-trips the field.
 	if err := database.GetDB().Model(&model.ClientRecord{}).
 		Where("id = ?", id).
 		UpdateColumn("ad_tag", updated.AdTag).Error; err != nil {
@@ -519,7 +505,6 @@ func (s *ClientService) Delete(inboundSvc *InboundService, id int, keepTraffic b
 	if err != nil {
 		return false, err
 	}
-	tombstoneClientEmail(existing.Email)
 
 	inboundIds, err := s.GetInboundIdsForRecord(id)
 	if err != nil {
@@ -566,28 +551,11 @@ func (s *ClientService) Delete(inboundSvc *InboundService, id int, keepTraffic b
 
 	db := database.GetDB()
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if existing.Email != "" {
-			if err := adjustGroupBaselinesForRemovedTraffic(tx, []string{existing.Email}); err != nil {
-				return err
-			}
-		}
 		if err := tx.Where("client_id = ?", id).Delete(&model.ClientInbound{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("client_id = ?", id).Delete(&model.ClientExternalLink{}).Error; err != nil {
 			return err
 		}
 		if !keepTraffic && existing.Email != "" {
 			if err := tx.Where("email = ?", existing.Email).Delete(&xray.ClientTraffic{}).Error; err != nil {
-				return err
-			}
-			if err := clearGlobalTraffic(tx, existing.Email); err != nil {
-				return err
-			}
-			if err := tx.Where("client_email = ?", existing.Email).Delete(&model.InboundClientIps{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("email = ?", existing.Email).Delete(&model.NodeClientTraffic{}).Error; err != nil {
 				return err
 			}
 		}
@@ -735,15 +703,6 @@ func (s *ClientService) DeleteByEmail(inboundSvc *InboundService, email string, 
 	if !keepTraffic {
 		db := database.GetDB()
 		if err := db.Where("email = ?", email).Delete(&xray.ClientTraffic{}).Error; err != nil {
-			return needRestart, err
-		}
-		if err := clearGlobalTraffic(db, email); err != nil {
-			return needRestart, err
-		}
-		if err := db.Where("client_email = ?", email).Delete(&model.InboundClientIps{}).Error; err != nil {
-			return needRestart, err
-		}
-		if err := db.Where("email = ?", email).Delete(&model.NodeClientTraffic{}).Error; err != nil {
 			return needRestart, err
 		}
 	}

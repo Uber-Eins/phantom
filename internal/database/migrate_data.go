@@ -40,21 +40,12 @@ func migrationModels() []any {
 		&model.User{},
 		&model.Setting{},
 		&model.HistoryOfSeeders{},
-		&model.Node{},
-		&model.ApiToken{},
 		&model.Inbound{},
 		&xray.ClientTraffic{},
 		&model.OutboundTraffics{},
-		&model.InboundClientIps{},
 		&model.ClientRecord{},
 		&model.ClientInbound{},
-		&model.ClientExternalLink{},
-		&model.ClientGroup{},
 		&model.InboundFallback{},
-		&model.Host{},
-		&model.NodeClientTraffic{},
-		&model.NodeClientIp{},
-		&model.ClientGlobalTraffic{},
 		&model.OutboundSubscription{},
 	}
 }
@@ -137,6 +128,9 @@ func MigrateData(srcPath, dstDSN string) error {
 	if txErr != nil {
 		return txErr
 	}
+	if err := MigrateSingleMachine(dst); err != nil {
+		return fmt.Errorf("apply single-machine cleanup: %w", err)
+	}
 
 	// setval is never rolled back by PostgreSQL, so sequences are resynced only
 	// after the transaction has committed.
@@ -145,7 +139,7 @@ func MigrateData(srcPath, dstDSN string) error {
 	}
 
 	log.Printf("Migration complete: %d rows across %d tables.", totalRows, len(migrationModels()))
-	log.Println("Set XUI_DB_TYPE=postgres and XUI_DB_DSN=... in /etc/default/x-ui, then restart x-ui.")
+	log.Println("Set XUI_DB_TYPE=postgres and XUI_DB_DSN in the process environment, then restart the panel.")
 	return nil
 }
 
@@ -202,7 +196,7 @@ func copyAllModels(src, dst *gorm.DB) error {
 			return fmt.Errorf("copy %T: %w", m, err)
 		}
 	}
-	return nil
+	return MigrateSingleMachine(dst)
 }
 
 func copyTable(src, dst *gorm.DB, mdl any) (int, error) {

@@ -49,7 +49,6 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.GET("/list/paged", a.listPaged)
 	g.GET("/get/:email", a.get)
 	g.GET("/traffic/:email", a.getTrafficByEmail)
-	g.GET("/subLinks/:subId", a.getSubLinks)
 	g.GET("/links/:email", a.getClientLinks)
 
 	g.POST("/add", a.create)
@@ -57,7 +56,6 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.POST("/del/:email", a.delete)
 	g.POST("/:email/attach", a.attach)
 	g.POST("/:email/detach", a.detach)
-	g.POST("/:email/externalLinks", a.setExternalLinks)
 	g.GET("/export", a.export)
 	g.POST("/import", a.importClients)
 	g.POST("/delOrphans", a.delOrphans)
@@ -73,12 +71,7 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.POST("/bulkResetTraffic", a.bulkResetTraffic)
 	g.POST("/resetTraffic/:email", a.resetTrafficByEmail)
 	g.POST("/updateTraffic/:email", a.updateTrafficByEmail)
-	g.POST("/ips/:email", a.getIps)
-	g.POST("/clearIps/:email", a.clearIps)
 	g.POST("/onlines", a.onlines)
-	g.POST("/onlinesByGuid", a.onlinesByGuid)
-	g.POST("/clientIpsByGuid", a.clientIpsByGuid)
-	g.POST("/activeInbounds", a.activeInbounds)
 	g.POST("/lastOnline", a.lastOnline)
 }
 
@@ -117,25 +110,20 @@ func (a *ClientController) get(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
 		return
 	}
-	externalLinks, err := a.clientService.GetExternalLinksForRecord(rec.Id)
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
 	flow, err := a.clientService.EffectiveFlow(nil, rec.Id)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
 		return
 	}
 	rec.Flow = flow
-	// Consumed bytes (up+down, including cross-node global overlay) so API
-	// consumers can pair usage with the client's totalGB quota (#4973).
+	// Consumed bytes (up+down) let API consumers pair usage with the client's
+	// totalGB quota (#4973).
 	// Best-effort: a traffic lookup failure must not break the client fetch.
 	var usedTraffic int64
 	if t, tErr := a.inboundService.GetClientTrafficByEmail(email); tErr == nil && t != nil {
 		usedTraffic = t.Up + t.Down
 	}
-	jsonObj(c, gin.H{"client": rec, "inboundIds": inboundIds, "externalLinks": externalLinks, "usedTraffic": usedTraffic}, nil)
+	jsonObj(c, gin.H{"client": rec, "inboundIds": inboundIds, "usedTraffic": usedTraffic}, nil)
 }
 
 func (a *ClientController) create(c *gin.Context) {
@@ -149,7 +137,7 @@ func (a *ClientController) create(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), pendingNodeObj(a.inboundService.AnyNodePending(payload.InboundIds)), nil)
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
@@ -169,7 +157,7 @@ func (a *ClientController) update(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), pendingNodeObj(a.clientService.HasPendingNode(&a.inboundService, email)), nil)
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
@@ -195,10 +183,6 @@ type attachDetachBody struct {
 	InboundIds []int `json:"inboundIds"`
 }
 
-type externalLinksBody struct {
-	ExternalLinks []service.ExternalLinkInput `json:"externalLinks"`
-}
-
 func (a *ClientController) attach(c *gin.Context) {
 	email := c.Param("email")
 	var body attachDetachBody
@@ -211,25 +195,10 @@ func (a *ClientController) attach(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), pendingNodeObj(a.inboundService.AnyNodePending(body.InboundIds)), nil)
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
-	notifyClientsChanged()
-}
-
-func (a *ClientController) setExternalLinks(c *gin.Context) {
-	email := c.Param("email")
-	var body externalLinksBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	if err := a.clientService.SetExternalLinksByEmail(email, body.ExternalLinks); err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), nil)
 	notifyClientsChanged()
 }
 
@@ -487,36 +456,8 @@ func (a *ClientController) updateTrafficByEmail(c *gin.Context) {
 	notifyClientsChanged()
 }
 
-func (a *ClientController) getIps(c *gin.Context) {
-	email := c.Param("email")
-	infos, err := a.inboundService.GetClientIpsWithNodes(email)
-	jsonObj(c, infos, err)
-}
-
-func (a *ClientController) clientIpsByGuid(c *gin.Context) {
-	data, err := a.inboundService.GetClientIpsByGuid()
-	jsonObj(c, data, err)
-}
-
-func (a *ClientController) clearIps(c *gin.Context) {
-	email := c.Param("email")
-	if err := a.inboundService.ClearClientIps(email); err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.updateSuccess"), err)
-		return
-	}
-	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.logCleanSuccess"), nil)
-}
-
 func (a *ClientController) onlines(c *gin.Context) {
 	jsonObj(c, a.inboundService.GetOnlineClients(), nil)
-}
-
-func (a *ClientController) onlinesByGuid(c *gin.Context) {
-	jsonObj(c, a.inboundService.GetOnlineClientsByGuid(), nil)
-}
-
-func (a *ClientController) activeInbounds(c *gin.Context) {
-	jsonObj(c, a.inboundService.GetActiveInboundsByGuid(), nil)
 }
 
 func (a *ClientController) lastOnline(c *gin.Context) {
@@ -532,15 +473,6 @@ func (a *ClientController) getTrafficByEmail(c *gin.Context) {
 		return
 	}
 	jsonObj(c, traffic, nil)
-}
-
-func (a *ClientController) getSubLinks(c *gin.Context) {
-	links, err := a.inboundService.GetSubLinks(resolveHost(c), c.Param("subId"))
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
-	jsonObj(c, links, nil)
 }
 
 func (a *ClientController) getClientLinks(c *gin.Context) {
@@ -564,7 +496,7 @@ func (a *ClientController) detach(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientDeleteSuccess"), pendingNodeObj(a.inboundService.AnyNodePending(body.InboundIds)), nil)
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientDeleteSuccess"), nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}

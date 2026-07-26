@@ -32,24 +32,25 @@ describe('InboundSettingsSchema fixtures', () => {
 // assert the load-bearing transforms directly, so a broken coercion fails independently
 // of the snapshot baseline.
 describe('InboundSettingsSchema coercions', () => {
-  it('vmess: defaults alterId to 0 and coerces a string tgId to a number', () => {
+  it('vmess: defaults alterId and strips removed client fields', () => {
     const parsed = InboundSettingsSchema.parse({
       protocol: 'vmess',
-      settings: { clients: [{ id: 'u1', email: 'a@b.c', tgId: '12345' }] },
+      settings: {
+        clients: [{
+          id: 'u1',
+          email: 'a@b.c',
+          tgId: '12345',
+          limitIp: 2,
+          group: 'legacy',
+        }],
+      },
     });
     if (parsed.protocol !== 'vmess') throw new Error('discriminator narrowed to the wrong protocol');
     const client = parsed.settings.clients[0];
-    expect(client.alterId).toBe(0); // .default(0) injected for omitted field
-    expect(client.tgId).toBe(12345); // string -> number transform
-  });
-
-  it('vmess: a non-numeric tgId coerces to 0', () => {
-    const parsed = InboundSettingsSchema.parse({
-      protocol: 'vmess',
-      settings: { clients: [{ id: 'u1', email: 'a@b.c', tgId: 'not-a-number' }] },
-    });
-    if (parsed.protocol !== 'vmess') throw new Error('wrong protocol');
-    expect(parsed.settings.clients[0].tgId).toBe(0); // Number(v) || 0
+    expect(client.alterId).toBe(0);
+    expect(client).not.toHaveProperty('tgId');
+    expect(client).not.toHaveProperty('limitIp');
+    expect(client).not.toHaveProperty('group');
   });
 
   it('vless: defaults decryption and encryption to "none"', () => {

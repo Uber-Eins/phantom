@@ -118,8 +118,7 @@ func (s *series) pickTier(spanSeconds int64) *tierBuf {
 }
 
 // metricHistory is a thread-safe, in-memory store of tiered series keyed by
-// arbitrary strings. Three singletons live below: system-wide host metrics,
-// per-node metrics, and xray expvar metrics.
+// arbitrary strings. Separate singletons below hold host and Xray metrics.
 type metricHistory struct {
 	mu     sync.Mutex
 	series map[string]*series
@@ -141,8 +140,7 @@ func (h *metricHistory) append(metric string, t time.Time, v float64) {
 	s.add(t.Unix(), v)
 }
 
-// drop removes the entire history for one metric. Used when a node is deleted so
-// its old samples don't linger forever in the singleton.
+// drop removes the entire history for one metric.
 func (h *metricHistory) drop(metric string) {
 	h.mu.Lock()
 	delete(h.series, metric)
@@ -271,12 +269,10 @@ func (h *metricHistory) restore(data map[string]persistedSeries) {
 }
 
 // systemMetrics holds whole-host time series (cpu, mem, netUp, etc.) fed by
-// ServerService.RefreshStatus every 2s. nodeMetrics holds per-node CPU/Mem fed
-// by NodeHeartbeatJob. xrayMetrics holds xray expvar series. Only systemMetrics
-// is persisted; the others rebuild from live connections.
+// ServerService.RefreshStatus every 2s. xrayMetrics holds xray expvar series.
+// Only systemMetrics is persisted; xray metrics rebuild from the local process.
 var (
 	systemMetrics = newMetricHistory()
-	nodeMetrics   = newMetricHistory()
 	xrayMetrics   = newMetricHistory()
 )
 
@@ -286,9 +282,6 @@ var (
 var SystemMetricKeys = []string{
 	"cpu", "mem", "swap", "netUp", "netDown", "pktUp", "pktDown", "diskRead", "diskWrite", "diskUsage", "tcpCount", "udpCount", "online", "load1", "load5", "load15",
 }
-
-// NodeMetricKeys lists the per-node metric names NodeHeartbeatJob writes.
-var NodeMetricKeys = []string{"cpu", "mem", "netUp", "netDown"}
 
 // XrayMetricKeys lists series sourced from xray's /debug/vars expvar endpoint.
 var XrayMetricKeys = []string{

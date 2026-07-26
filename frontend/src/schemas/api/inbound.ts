@@ -10,7 +10,7 @@ import { NetworkSettingsSchema, StreamExtrasSchema } from '@/schemas/protocols/s
 //     union (10 protocols, tagged-wrapper {protocol, settings}).
 //   - StreamSettings as an intersection of the network DU (6 branches),
 //     security DU (3 branches), and the orthogonal extras (finalmask,
-//     sockopt, externalProxy). Zod 4 supports DU intersection — each
+//     sockopt). Zod 4 supports DU intersection — each
 //     branch validates its slice of the same input object.
 //
 // The id/up/down/total/expiryTime fields are int64 on the Go side but
@@ -34,8 +34,6 @@ export const InboundCoreSchema = z.object({
   listen: z.string().default(''),
   port: InboundPortSchema,
   tag: z.string().default(''),
-  shareAddrStrategy: z.enum(['node', 'listen', 'custom']).default('node'),
-  shareAddr: z.string().default(''),
   sniffing: SniffingSchema.default({
     enabled: false,
     destOverride: ['http', 'tls', 'quic', 'fakedns'],

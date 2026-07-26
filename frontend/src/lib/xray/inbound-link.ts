@@ -7,7 +7,6 @@ import type {
   WireguardInboundPeer,
   WireguardInboundSettings,
 } from '@/schemas/protocols/inbound/wireguard';
-import type { ExternalProxyEntry } from '@/schemas/protocols/stream/external-proxy';
 import type { FinalMaskStreamSettings } from '@/schemas/protocols/stream/finalmask';
 import type { XHttpStreamSettings } from '@/schemas/protocols/stream/xhttp';
 
@@ -137,35 +136,6 @@ function applyFinalMaskToObj(
   if (payload.length > 0) obj.fm = payload;
 }
 
-function externalProxyAlpn(value: ExternalProxyEntry['alpn']): string {
-  if (Array.isArray(value)) return value.filter(Boolean).join(',');
-  return '';
-}
-
-function externalProxyPins(value: ExternalProxyEntry['pinnedPeerCertSha256']): string {
-  if (Array.isArray(value)) return value.filter(Boolean).join(',');
-  return '';
-}
-
-function applyExternalProxyTLSObj(
-  externalProxy: ExternalProxyEntry | null | undefined,
-  obj: Record<string, unknown>,
-  security: string,
-): void {
-  if (!externalProxy || security !== 'tls') return;
-  const sni = externalProxy.sni && externalProxy.sni.length > 0 ? externalProxy.sni : externalProxy.dest;
-  if (sni && sni.length > 0) obj.sni = sni;
-  if (externalProxy.fingerprint && externalProxy.fingerprint.length > 0) obj.fp = externalProxy.fingerprint;
-  const alpn = externalProxyAlpn(externalProxy.alpn);
-  if (alpn.length > 0) obj.alpn = alpn;
-  const pins = externalProxyPins(externalProxy.pinnedPeerCertSha256);
-  if (pins.length > 0) obj.pcs = pins;
-  if (externalProxy.verifyPeerCertByName && externalProxy.verifyPeerCertByName.length > 0) {
-    obj.vcn = externalProxy.verifyPeerCertByName;
-  }
-  if (externalProxy.echConfigList && externalProxy.echConfigList.length > 0) obj.ech = externalProxy.echConfigList;
-}
-
 export interface GenVmessLinkInput {
   inbound: Inbound;
   address: string;
@@ -174,7 +144,6 @@ export interface GenVmessLinkInput {
   remark?: string;
   clientId: string;
   security?: VmessSecurity;
-  externalProxy?: ExternalProxyEntry | null;
 }
 
 // VMess share link: `vmess://` followed by base64-encoded JSON. The JSON
@@ -189,7 +158,6 @@ export function genVmessLink(input: GenVmessLinkInput): string {
     remark = '',
     clientId,
     security,
-    externalProxy = null,
   } = input;
 
   if (inbound.protocol !== 'vmess') return '';
@@ -268,14 +236,11 @@ export function genVmessLink(input: GenVmessLinkInput): string {
     }
   }
 
-  applyExternalProxyTLSObj(externalProxy, obj, tls);
-
   return 'vmess://' + Base64.encode(JSON.stringify(obj, null, 2));
 }
 
 // Param-style helpers (vless/trojan/ss/hysteria links). These mirror the
-// legacy applyXhttpExtraToParams / applyFinalMaskToParams /
-// applyExternalProxyTLSParams but write to a URLSearchParams instance
+// legacy applyXhttpExtraToParams / applyFinalMaskToParams but write to a URLSearchParams instance
 // directly. Number values get coerced via .toString() on set — same as
 // what URLSearchParams does internally so the resulting URL bytes match.
 
@@ -297,25 +262,6 @@ function applyFinalMaskToParams(finalmask: FinalMaskStreamSettings | undefined, 
   if (payload.length > 0) params.set('fm', payload);
 }
 
-function applyExternalProxyTLSParams(
-  externalProxy: ExternalProxyEntry | null | undefined,
-  params: URLSearchParams,
-  security: string,
-): void {
-  if (!externalProxy || security !== 'tls') return;
-  const sni = externalProxy.sni && externalProxy.sni.length > 0 ? externalProxy.sni : externalProxy.dest;
-  if (sni && sni.length > 0) params.set('sni', sni);
-  if (externalProxy.fingerprint && externalProxy.fingerprint.length > 0) params.set('fp', externalProxy.fingerprint);
-  const alpn = externalProxyAlpn(externalProxy.alpn);
-  if (alpn.length > 0) params.set('alpn', alpn);
-  const pins = externalProxyPins(externalProxy.pinnedPeerCertSha256);
-  if (pins.length > 0) params.set('pcs', pins);
-  if (externalProxy.verifyPeerCertByName && externalProxy.verifyPeerCertByName.length > 0) {
-    params.set('vcn', externalProxy.verifyPeerCertByName);
-  }
-  if (externalProxy.echConfigList && externalProxy.echConfigList.length > 0) params.set('ech', externalProxy.echConfigList);
-}
-
 export interface GenVlessLinkInput {
   inbound: Inbound;
   address: string;
@@ -325,19 +271,6 @@ export interface GenVlessLinkInput {
   clientId: string;
   clientKey?: string;
   flow?: VlessClient['flow'];
-  externalProxy?: ExternalProxyEntry | null;
-}
-
-// Mirror of the Go applyVlessRoute: bake a single 0-65535 value into the UUID's
-// 3rd group (bytes 6-7), which xray reads as the vless route. Empty/invalid/non-
-// UUID input is returned unchanged.
-export function applyVlessRoute(id: string, route: string | undefined): string {
-  const r = (route ?? '').trim();
-  if (r === '' || !/^\d{1,5}$/.test(r)) return id;
-  const n = Number(r);
-  if (n > 65535) return id;
-  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)) return id;
-  return id.slice(0, 14) + n.toString(16).padStart(4, '0') + id.slice(18);
 }
 
 // VLESS share link: vless://<uuid>@<host>:<port>?<query>#<remark>. The
@@ -354,7 +287,6 @@ export function genVlessLink(input: GenVlessLinkInput): string {
     clientId,
     clientKey = '',
     flow = '',
-    externalProxy = null,
   } = input;
 
   if (inbound.protocol !== 'vless') return '';
@@ -417,7 +349,6 @@ export function genVlessLink(input: GenVlessLinkInput): string {
         params.set('pcs', tls.settings.pinnedPeerCertSha256.join(','));
       }
     }
-    applyExternalProxyTLSParams(externalProxy, params, security);
   } else if (security === 'reality') {
     params.set('security', 'reality');
     if (stream.security === 'reality') {
@@ -443,8 +374,8 @@ export function genVlessLink(input: GenVlessLinkInput): string {
 
   // XTLS Vision flow: TCP over tls/reality (classic) or XHTTP+vlessenc (the
   // VLESS-level encryption stands in for transport TLS). Mirrors the backend's
-  // vlessFlowAllowed and the form's flow-field gating so panel link, share
-  // link and subscription agree.
+  // vlessFlowAllowed and the form's flow-field gating so frontend and backend
+  // generated links agree.
   if (flow.length > 0 && canEnableTlsFlow({
     protocol: inbound.protocol,
     settings: inbound.settings,
@@ -453,7 +384,7 @@ export function genVlessLink(input: GenVlessLinkInput): string {
     params.set('flow', flow);
   }
 
-  const url = new URL(`vless://${applyVlessRoute(clientId, externalProxy?.vlessRoute)}@${formatUrlHost(address)}:${port}`);
+  const url = new URL(`vless://${clientId}@${formatUrlHost(address)}:${port}`);
   for (const [key, value] of params) url.searchParams.set(key, value);
   url.hash = encodeURIComponent(remark);
   return url.toString();
@@ -543,7 +474,6 @@ export interface GenTrojanLinkInput {
   remark?: string;
   clientPassword: string;
   clientKey?: string;
-  externalProxy?: ExternalProxyEntry | null;
 }
 
 // Trojan share link: trojan://<password>@<host>:<port>?<query>#<remark>.
@@ -558,7 +488,6 @@ export function genTrojanLink(input: GenTrojanLinkInput): string {
     remark = '',
     clientPassword,
     clientKey = '',
-    externalProxy = null,
   } = input;
 
   if (inbound.protocol !== 'trojan') return '';
@@ -575,7 +504,6 @@ export function genTrojanLink(input: GenTrojanLinkInput): string {
   if (security === 'tls') {
     params.set('security', 'tls');
     writeTlsParams(stream, params);
-    applyExternalProxyTLSParams(externalProxy, params, security);
   } else if (security === 'reality') {
     params.set('security', 'reality');
     writeRealityParams(stream, params, clientKey);
@@ -596,7 +524,6 @@ export interface GenShadowsocksLinkInput {
   forceTls?: ForceTls;
   remark?: string;
   clientPassword?: string;
-  externalProxy?: ExternalProxyEntry | null;
 }
 
 // Shadowsocks 2022 share link. The userinfo portion is base64(method:pw)
@@ -614,7 +541,6 @@ export function genShadowsocksLink(input: GenShadowsocksLinkInput): string {
     forceTls = 'same',
     remark = '',
     clientPassword = '',
-    externalProxy = null,
   } = input;
 
   if (inbound.protocol !== 'shadowsocks') return '';
@@ -632,7 +558,6 @@ export function genShadowsocksLink(input: GenShadowsocksLinkInput): string {
   if (security === 'tls') {
     params.set('security', 'tls');
     writeTlsParams(stream, params);
-    applyExternalProxyTLSParams(externalProxy, params, security);
   }
 
   // SIP002 clients (v2rayN) ignore type/headerType/host/path and only read
@@ -679,7 +604,6 @@ export interface GenHysteriaLinkInput {
   port?: number;
   remark?: string;
   clientAuth: string;
-  externalProxy?: ExternalProxyEntry | null;
 }
 
 // Hysteria2's pinSHA256 must be a 64-char lowercase hex string — Xray-core
@@ -720,7 +644,6 @@ export function genHysteriaLink(input: GenHysteriaLinkInput): string {
     port = inbound.port,
     remark = '',
     clientAuth,
-    externalProxy = null,
   } = input;
 
   if (inbound.protocol !== 'hysteria') return '';
@@ -743,14 +666,6 @@ export function genHysteriaLink(input: GenHysteriaLinkInput): string {
   if (tls.settings.pinnedPeerCertSha256.length > 0) {
     params.set('pinSHA256', tls.settings.pinnedPeerCertSha256.map(hysteriaPinHex).join(','));
   }
-  // An external-proxy entry can pin a different endpoint's certificate.
-  // Hysteria carries it as hex `pinSHA256` (not the `pcs` other protocols
-  // use), so coerce each entry through hysteriaPinHex like the main pin.
-  if (Array.isArray(externalProxy?.pinnedPeerCertSha256)) {
-    const epPins = externalProxy.pinnedPeerCertSha256.filter(Boolean).map(hysteriaPinHex);
-    if (epPins.length > 0) params.set('pinSHA256', epPins.join(','));
-  }
-
   const udpMasks = stream.finalmask?.udp;
   if (Array.isArray(udpMasks)) {
     const salamander = udpMasks.find((m) => m?.type === 'salamander');
@@ -978,69 +893,11 @@ function shareableListenFrom(listen: string): string {
     : '';
 }
 
-type ShareAddrStrategy = 'node' | 'listen' | 'custom';
-
-function normalizeShareAddrStrategy(strategy: string | undefined): ShareAddrStrategy {
-  return strategy === 'listen' || strategy === 'custom' ? strategy : 'node';
-}
-
-// ShareHostFields is the subset of an inbound resolveShareHost needs, so callers
-// holding only a lightweight projection (e.g. the clients page InboundOption)
-// can pick the same host as the full-inbound share/QR path.
-export interface ShareHostFields {
-  listen?: string;
-  shareAddr?: string;
-  shareAddrStrategy?: string;
-}
-
-// resolveShareHost picks the host that goes into share/QR links, the browser-side
-// analog of the backend resolveInboundAddress. hostOverride is the hosting node's
-// address (empty for this panel's own inbounds); fallbackHostname is the
-// already-resolved panel/public host used as the last resort — kept verbatim when
-// it fails normalization (e.g. an underscore intranet hostname) so the last
-// resort never degrades to an empty host.
-export function resolveShareHost(
-  fields: ShareHostFields,
-  hostOverride: string,
-  fallbackHostname: string,
-): string {
-  const nodeAddr = normalizeShareHost(hostOverride);
-  const listenAddr = shareableListenFrom(fields.listen ?? '');
-  const customAddr = normalizeShareHost(fields.shareAddr ?? '');
-  const fallbackAddr = normalizeShareHost(fallbackHostname) || fallbackHostname.trim();
-  switch (normalizeShareAddrStrategy(fields.shareAddrStrategy)) {
-    case 'listen':
-      return listenAddr || nodeAddr || fallbackAddr;
-    case 'custom':
-      return customAddr || nodeAddr || listenAddr || fallbackAddr;
-    default:
-      return nodeAddr || listenAddr || fallbackAddr;
-  }
-}
-
-// Orchestrators.
-// resolveAddr picks the host that goes into share/QR links. The default
-// `node` strategy keeps the previous node-address-first behavior for
-// node-managed inbounds; other strategies let a row prefer its listen address
-// or a custom endpoint.
-export function resolveAddr(inbound: Inbound, hostOverride: string, fallbackHostname: string): string {
-  return resolveShareHost(inbound, hostOverride, fallbackHostname);
-}
-
-// A loopback browser host means the panel was reached through a tunnel (e.g.
-// SSH-forwarded 127.0.0.1/localhost), so it can never be a shareable link host.
-function isLoopbackHost(host: string): boolean {
-  const h = host.trim().replace(/^\[|\]$/g, '').toLowerCase();
-  return h === 'localhost' || h === '::1' || h.startsWith('127.');
-}
-
-// preferPublicHost is the browser-side analog of the backend's
-// configuredPublicHost: when the panel is reached on a loopback host, prefer a
-// configured public host (Sub/Web Domain) for share/QR links instead of leaking
-// localhost. An explicit per-inbound listen or node override still wins, since
-// resolveAddr only reaches the fallbackHostname after those.
-export function preferPublicHost(browserHost: string, publicHost: string): string {
-  return publicHost && isLoopbackHost(browserHost) ? publicHost : browserHost;
+// Resolve local links from the local listen address when it is externally
+// usable, otherwise from the host used for the authenticated panel request.
+export function resolveAddr(inbound: Inbound, fallbackHostname: string): string {
+  const listenAddr = shareableListenFrom(inbound.listen ?? '');
+  return listenAddr || normalizeShareHost(fallbackHostname) || fallbackHostname.trim();
 }
 
 // Returns the client array for protocols that have one. SS returns its
@@ -1051,7 +908,7 @@ export function preferPublicHost(browserHost: string, publicHost: string): strin
 type ClientShape = { id?: string; security?: VmessSecurity; flow?: VlessClient['flow']; password?: string; auth?: string; secret?: string; email?: string; subId?: string };
 
 // Mirror of the Go subKey: the stable per-client identity spx derivation
-// keys on — subscription id first, unique email as the fallback.
+// keys on — stable sharing id first, unique email as the fallback.
 function clientSubKey(client: ClientShape): string {
   return client.subId || client.email || '';
 }
@@ -1084,7 +941,6 @@ export interface GenLinkInput {
   forceTls?: ForceTls;
   remark?: string;
   client: ClientShape;
-  externalProxy?: ExternalProxyEntry | null;
 }
 
 // Per-protocol dispatcher matching the legacy `genLink` switch. Returns
@@ -1092,14 +948,13 @@ export interface GenLinkInput {
 // goes through genWireguardLinks/Configs separately, http/mixed/tunnel
 // don't have share URLs).
 export function genLink(input: GenLinkInput): string {
-  const { inbound, address, port = inbound.port, forceTls = 'same', remark = '', client, externalProxy = null } = input;
+  const { inbound, address, port = inbound.port, forceTls = 'same', remark = '', client } = input;
   switch (inbound.protocol) {
     case 'vmess':
       return genVmessLink({
         inbound, address, port, forceTls, remark,
         clientId: client.id ?? '',
         security: client.security,
-        externalProxy,
       });
     case 'vless':
       return genVlessLink({
@@ -1107,14 +962,12 @@ export function genLink(input: GenLinkInput): string {
         clientId: client.id ?? '',
         clientKey: clientSubKey(client),
         flow: client.flow,
-        externalProxy,
       });
     case 'shadowsocks': {
       const isMultiUser = inbound.settings.method !== '2022-blake3-chacha20-poly1305';
       return genShadowsocksLink({
         inbound, address, port, forceTls, remark,
         clientPassword: isMultiUser ? (client.password ?? '') : '',
-        externalProxy,
       });
     }
     case 'trojan':
@@ -1122,13 +975,11 @@ export function genLink(input: GenLinkInput): string {
         inbound, address, port, forceTls, remark,
         clientPassword: client.password ?? '',
         clientKey: clientSubKey(client),
-        externalProxy,
       });
     case 'hysteria':
       return genHysteriaLink({
         inbound, address, port, remark,
         clientAuth: client.auth ?? '',
-        externalProxy,
       });
     case 'mtproto':
       return genMtprotoLink({ inbound, address, port, clientSecret: client.secret ?? '' });
@@ -1146,55 +997,27 @@ export interface GenAllLinksInput {
   inbound: Inbound;
   remark?: string;
   client: ClientShape;
-  hostOverride?: string;
   fallbackHostname: string;
 }
 
-// Fans out a single client's link per externalProxy entry, or just one link
-// when there are no external proxies. The panel copy/QR remark is the inbound
-// remark plus the externalProxy remark, dash-joined (the configurable
-// subscription remark model was removed; subscription output uses the template).
+// Generates the local connection link for one client.
 export function genAllLinks(input: GenAllLinksInput): GenAllLinksEntry[] {
   const {
     inbound,
     remark = '',
     client,
-    hostOverride = '',
     fallbackHostname,
   } = input;
 
-  const addr = resolveAddr(inbound, hostOverride, fallbackHostname);
+  const addr = resolveAddr(inbound, fallbackHostname);
   const port = inbound.port;
 
-  const composeRemark = (proxyRemark: string): string =>
-    [remark, proxyRemark].filter((x) => x.length > 0).join('-');
-
-  const externals = inbound.streamSettings?.externalProxy;
-  if (!externals || externals.length === 0) {
-    const r = composeRemark('');
-    return [{ remark: r, link: genLink({ inbound, address: addr, port, forceTls: 'same', remark: r, client }) }];
-  }
-  return externals.map((ep) => {
-    const r = composeRemark(ep.remark);
-    return {
-      remark: r,
-      link: genLink({
-        inbound,
-        address: ep.dest,
-        port: ep.port,
-        forceTls: ep.forceTls,
-        remark: r,
-        client,
-        externalProxy: ep,
-      }),
-    };
-  });
+  return [{ remark, link: genLink({ inbound, address: addr, port, forceTls: 'same', remark, client }) }];
 }
 
 export interface GenInboundLinksInput {
   inbound: Inbound;
   remark?: string;
-  hostOverride?: string;
   fallbackHostname: string;
 }
 
@@ -1207,15 +1030,14 @@ export function genInboundLinks(input: GenInboundLinksInput): string {
   const {
     inbound,
     remark = '',
-    hostOverride = '',
     fallbackHostname,
   } = input;
-  const addr = resolveAddr(inbound, hostOverride, fallbackHostname);
+  const addr = resolveAddr(inbound, fallbackHostname);
   const clients = getInboundClients(inbound);
   if (clients) {
     const links: string[] = [];
     for (const client of clients) {
-      const entries = genAllLinks({ inbound, remark, client, hostOverride, fallbackHostname });
+      const entries = genAllLinks({ inbound, remark, client, fallbackHostname });
       for (const e of entries) links.push(e.link);
     }
     return links.join('\r\n');
@@ -1224,7 +1046,7 @@ export function genInboundLinks(input: GenInboundLinksInput): string {
     return genShadowsocksLink({ inbound, address: addr, port: inbound.port, forceTls: 'same', remark });
   }
   if (inbound.protocol === 'wireguard') {
-    return genWireguardConfigs({ inbound, remark, hostOverride, fallbackHostname });
+    return genWireguardConfigs({ inbound, remark, fallbackHostname });
   }
   return '';
 }
@@ -1235,7 +1057,6 @@ export function genInboundLinks(input: GenInboundLinksInput): string {
 export interface GenWireguardFanoutInput {
   inbound: Inbound;
   remark?: string;
-  hostOverride?: string;
   fallbackHostname: string;
 }
 
@@ -1253,9 +1074,9 @@ function wgRenderPeers(settings: WireguardInboundSettings): WireguardInboundPeer
 }
 
 export function genWireguardLinks(input: GenWireguardFanoutInput): string {
-  const { inbound, remark = '', hostOverride = '', fallbackHostname } = input;
+  const { inbound, remark = '', fallbackHostname } = input;
   if (inbound.protocol !== 'wireguard') return '';
-  const addr = resolveAddr(inbound, hostOverride, fallbackHostname);
+  const addr = resolveAddr(inbound, fallbackHostname);
   const sep = '-';
   const baseSettings = inbound.settings as WireguardInboundSettings;
   const peers = wgRenderPeers(baseSettings);
@@ -1272,9 +1093,9 @@ export function genWireguardLinks(input: GenWireguardFanoutInput): string {
 }
 
 export function genWireguardConfigs(input: GenWireguardFanoutInput): string {
-  const { inbound, remark = '', hostOverride = '', fallbackHostname } = input;
+  const { inbound, remark = '', fallbackHostname } = input;
   if (inbound.protocol !== 'wireguard') return '';
-  const addr = resolveAddr(inbound, hostOverride, fallbackHostname);
+  const addr = resolveAddr(inbound, fallbackHostname);
   const sep = '-';
   const baseSettings = inbound.settings as WireguardInboundSettings;
   const peers = wgRenderPeers(baseSettings);

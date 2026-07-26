@@ -44,11 +44,8 @@ import {
   SearchOutlined,
   SortAscendingOutlined,
   StopOutlined,
-  TagsOutlined,
   TeamOutlined,
   UploadOutlined,
-  UsergroupAddOutlined,
-  UsergroupDeleteOutlined,
 } from '@ant-design/icons';
 import { activateOnKey } from '@/utils/a11y';
 
@@ -57,9 +54,8 @@ import { formatInboundLabel } from '@/lib/inbounds/label';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useClients } from '@/hooks/useClients';
-import { useNodesQuery } from '@/api/queries/useNodesQuery';
 import { useDatepicker } from '@/hooks/useDatepicker';
-import type { ClientRecord, InboundOption, ExternalLink, ExternalLinkInput } from '@/hooks/useClients';
+import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import ClientTrafficCell from '@/components/clients/ClientTrafficCell';
 import ClientSpeedTag, { isActiveSpeed } from '@/components/clients/ClientSpeedTag';
 import ClientCardComment from '@/components/clients/ClientCardComment';
@@ -74,8 +70,6 @@ const ClientQrModal = lazy(() => import('./ClientQrModal'));
 const ClientBulkAddModal = lazy(() => import('./ClientBulkAddModal'));
 const ClientBulkAdjustModal = lazy(() => import('./ClientBulkAdjustModal'));
 const FilterDrawer = lazy(() => import('./FilterDrawer'));
-const SubLinksModal = lazy(() => import('./SubLinksModal'));
-const BulkAddToGroupModal = lazy(() => import('./BulkAddToGroupModal'));
 const BulkAttachInboundsModal = lazy(() => import('./BulkAttachInboundsModal'));
 const BulkDetachInboundsModal = lazy(() => import('./BulkDetachInboundsModal'));
 const TextModal = lazy(() => import('@/components/feedback/TextModal'));
@@ -86,45 +80,6 @@ import './ClientsPage.css';
 
 const FILTER_STATE_KEY = 'clientsFilterState';
 const DISABLED_PAGE_SIZE = 200;
-
-function UngroupIcon() {
-  return (
-    <span
-      style={{
-        position: 'relative',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '1em',
-        height: '1em',
-      }}
-    >
-      <TagsOutlined />
-      <span
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-        }}
-      >
-        <span
-          style={{
-            display: 'block',
-            width: '125%',
-            height: '1.5px',
-            background: 'currentColor',
-            transform: 'rotate(-45deg)',
-            borderRadius: '1px',
-          }}
-        />
-      </span>
-    </span>
-  );
-}
 
 type Bucket = 'active' | 'deactive' | 'depleted' | 'expiring';
 
@@ -160,8 +115,6 @@ function readFilterState(): PersistedFilterState {
         buckets: Array.isArray(fromRaw.buckets) ? fromRaw.buckets : [],
         protocols: Array.isArray(fromRaw.protocols) ? fromRaw.protocols : [],
         inboundIds: Array.isArray(fromRaw.inboundIds) ? fromRaw.inboundIds : [],
-        nodeIds: Array.isArray(fromRaw.nodeIds) ? fromRaw.nodeIds : [],
-        groups: Array.isArray(fromRaw.groups) ? fromRaw.groups : [],
       },
       sort: typeof raw.sort === 'string' ? raw.sort : '',
     };
@@ -206,11 +159,10 @@ export default function ClientsPage() {
   const {
     clients, total, filtered,
     summary: serverSummary,
-    allGroups,
     setQuery,
-    inbounds, onlines, loading, transitioning, fetched, fetchError, subSettings,
-    tgBotEnable, expireDiff, trafficDiff, pageSize,
-    create, update, remove, bulkDelete, bulkAdjust, bulkEnable, bulkDisable, bulkAddToGroup, bulkRemoveFromGroup, attach, setExternalLinks, bulkAttach, detach, bulkDetach,
+    inbounds, onlines, loading, transitioning, fetched, fetchError,
+    expireDiff, trafficDiff, pageSize,
+    create, update, remove, bulkDelete, bulkAdjust, bulkEnable, bulkDisable, attach, bulkAttach, detach, bulkDetach,
     resetTraffic, resetAllTraffics, delDepleted, delOrphans, exportClients, importClients, setEnable,
     clientSpeed,
     applyTrafficEvent, applyClientStatsEvent,
@@ -223,24 +175,17 @@ export default function ClientsPage() {
     client_stats: applyClientStatsEvent,
   });
 
-  // Node list for the Nodes filter; the section only renders when the panel
-  // actually manages nodes (#4997).
-  const { nodes } = useNodesQuery();
-
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
   const [editingAttachedIds, setEditingAttachedIds] = useState<number[]>([]);
-  const [editingExternalLinks, setEditingExternalLinks] = useState<ExternalLink[]>([]);
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoClient, setInfoClient] = useState<ClientRecord | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrClient, setQrClient] = useState<ClientRecord | null>(null);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [bulkAdjustOpen, setBulkAdjustOpen] = useState(false);
-  const [subLinksOpen, setSubLinksOpen] = useState(false);
-  const [bulkGroupOpen, setBulkGroupOpen] = useState(false);
   const [bulkAttachOpen, setBulkAttachOpen] = useState(false);
   const [bulkDetachOpen, setBulkDetachOpen] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -285,23 +230,6 @@ export default function ClientsPage() {
     setCurrentPage(1);
   }, [debouncedSearch, filters, sortColumn, sortOrder]);
 
-  // The node filter maps onto inbound ids client-side (#4997): the paging API
-  // already accepts an inbound CSV, so nodes never have to reach the backend.
-  // Sentinel 0 = "local panel" (inbounds without a nodeId).
-  const effectiveInboundCsv = useMemo(() => {
-    if (!filters.nodeIds.length) return filters.inboundIds.join(',');
-    const nodeSet = new Set(filters.nodeIds);
-    const nodeInboundIds = inbounds
-      .filter((ib) => nodeSet.has(ib.nodeId ?? 0))
-      .map((ib) => ib.id);
-    const pool = filters.inboundIds.length
-      ? nodeInboundIds.filter((id) => filters.inboundIds.includes(id))
-      : nodeInboundIds;
-    // Nothing matches the selected nodes: send an impossible id so the filter
-    // yields an honest empty result instead of being silently ignored.
-    return pool.length ? pool.join(',') : '-1';
-  }, [filters.nodeIds, filters.inboundIds, inbounds]);
-
   useEffect(() => {
     setQuery({
       page: currentPage,
@@ -309,19 +237,17 @@ export default function ClientsPage() {
       search: debouncedSearch,
       filter: filters.buckets.join(','),
       protocol: filters.protocols.join(','),
-      inbound: effectiveInboundCsv,
+      inbound: filters.inboundIds.join(','),
       expiryFrom: filters.expiryFrom,
       expiryTo: filters.expiryTo,
       usageFrom: gbToBytes(filters.usageFromGB),
       usageTo: gbToBytes(filters.usageToGB),
       autoRenew: filters.autoRenew || undefined,
-      hasTgId: filters.hasTgId || undefined,
       hasComment: filters.hasComment || undefined,
-      group: filters.groups.join(',') || undefined,
       sort: sortColumn || undefined,
       order: sortOrder || undefined,
     });
-  }, [setQuery, currentPage, tablePageSize, debouncedSearch, filters, effectiveInboundCsv, sortColumn, sortOrder]);
+  }, [setQuery, currentPage, tablePageSize, debouncedSearch, filters, sortColumn, sortOrder]);
 
   const activeCount = activeFilterCount(filters);
 
@@ -340,12 +266,6 @@ export default function ClientsPage() {
     const values = new Set<string>((inbounds || []).map((i) => i.protocol).filter((x): x is string => !!x));
     return [...values].sort();
   }, [inbounds]);
-
-  const groupOptions = useMemo(() => {
-    const values = new Set<string>(allGroups);
-    for (const g of filters.groups) values.add(g);
-    return [...values].sort((a, b) => a.localeCompare(b));
-  }, [allGroups, filters.groups]);
 
   const isOnline = useCallback((email: string) => !!email && onlineSet.has(email), [onlineSet]);
 
@@ -453,7 +373,6 @@ export default function ClientsPage() {
     setFormMode('add');
     setEditingClient(null);
     setEditingAttachedIds([]);
-    setEditingExternalLinks([]);
     setFormOpen(true);
   }
 
@@ -466,7 +385,6 @@ export default function ClientsPage() {
     setEditingClient(merged);
     const ids = full?.inboundIds ?? (Array.isArray(row.inboundIds) ? row.inboundIds : []);
     setEditingAttachedIds([...ids]);
-    setEditingExternalLinks(Array.isArray(full?.externalLinks) ? [...full.externalLinks] : []);
     setFormOpen(true);
   }
 
@@ -628,26 +546,6 @@ export default function ClientsPage() {
     });
   }
 
-  function onBulkUngroup() {
-    const emails = [...selectedRowKeys];
-    if (emails.length === 0) return;
-    modal.confirm({
-      title: t('pages.clients.ungroupConfirmTitle', { count: emails.length }),
-      content: t('pages.clients.ungroupConfirmContent'),
-      okText: t('confirm'),
-      okType: 'danger',
-      cancelText: t('cancel'),
-      onOk: async () => {
-        const msg = await bulkRemoveFromGroup(emails);
-        if (msg?.success) {
-          setSelectedRowKeys([]);
-          const affected = (msg.obj as { affected?: number } | undefined)?.affected ?? emails.length;
-          messageApi.success(t('pages.clients.ungroupSuccessToast', { count: affected }));
-        }
-      },
-    });
-  }
-
   function onBulkSetEnable(enable: boolean) {
     const emails = [...selectedRowKeys];
     if (emails.length === 0) return;
@@ -707,17 +605,11 @@ export default function ClientsPage() {
   const onSave = useCallback(async (
     payload: Record<string, unknown> | { client: Record<string, unknown>; inboundIds: number[] },
     meta:
-      | { isEdit: false; email: string; externalLinks: ExternalLinkInput[] }
-      | { isEdit: true; email: string; attach: number[]; detach: number[]; externalLinks: ExternalLinkInput[] },
+      | { isEdit: false; email: string }
+      | { isEdit: true; email: string; attach: number[]; detach: number[] },
   ) => {
     if (!meta.isEdit) {
-      const createMsg = await create(payload);
-      if (!createMsg?.success) return createMsg;
-      if (meta.email && meta.externalLinks.length > 0) {
-        const r = await setExternalLinks(meta.email, meta.externalLinks);
-        if (!r?.success) return r;
-      }
-      return createMsg;
+      return create(payload);
     }
     const updateMsg = await update(meta.email, payload);
     if (!updateMsg?.success) return updateMsg;
@@ -731,11 +623,8 @@ export default function ClientsPage() {
       const r = await detach(emailKey, meta.detach);
       if (!r?.success) return r;
     }
-    // Always replace the client's external links (an empty set clears them).
-    const r = await setExternalLinks(emailKey, meta.externalLinks);
-    if (!r?.success) return r;
     return updateMsg;
-  }, [create, update, attach, detach, setExternalLinks]);
+  }, [create, update, attach, detach]);
 
   const pageClass = useMemo(() => {
     const classes = ['clients-page'];
@@ -825,30 +714,6 @@ export default function ClientsPage() {
       ),
     },
     {
-      title: t('pages.clients.group'),
-      key: 'group',
-      width: 130,
-      hidden: allGroups.length === 0,
-      render: (_v, record) => {
-        if (!record.group) return <span style={{ color: 'rgba(0,0,0,0.45)' }}>—</span>;
-        const isActive = filters.groups.includes(record.group);
-        return (
-          <Tag
-            color="geekblue"
-            style={{ margin: 0, cursor: 'pointer', opacity: isActive ? 0.6 : 1 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!isActive) {
-                setFilters({ ...filters, groups: [...filters.groups, record.group!] });
-              }
-            }}
-          >
-            {record.group}
-          </Tag>
-        );
-      },
-    },
-    {
       title: t('pages.clients.attachedInbounds'),
       key: 'inboundIds',
       width: 170,
@@ -936,7 +801,7 @@ export default function ClientsPage() {
       ),
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [t, togglingEmail, clientBucket, isOnline, inboundsById, filters, allGroups, datepicker, trafficDiff, clientSpeed]);
+  ], [t, togglingEmail, clientBucket, isOnline, inboundsById, datepicker, trafficDiff, clientSpeed]);
 
   const tablePagination = {
     current: currentPage,
@@ -1078,31 +943,17 @@ export default function ClientsPage() {
                                 ? [
                                   {
                                     key: 'attach',
-                                    icon: <UsergroupAddOutlined />,
+                                    icon: <LinkOutlined />,
                                     label: t('pages.clients.attach'),
                                     onClick: () => setBulkAttachOpen(true),
                                   },
                                   {
                                     key: 'detach',
-                                    icon: <UsergroupDeleteOutlined />,
+                                    icon: <DisconnectOutlined />,
                                     label: t('pages.clients.detach'),
                                     danger: true,
                                     onClick: () => setBulkDetachOpen(true),
                                   },
-                                  {
-                                    key: 'addToGroup',
-                                    icon: <TagsOutlined />,
-                                    label: t('pages.clients.addToGroup'),
-                                    onClick: () => setBulkGroupOpen(true),
-                                  },
-                                  {
-                                    key: 'ungroup',
-                                    icon: <UngroupIcon />,
-                                    label: t('pages.clients.ungroup'),
-                                    danger: true,
-                                    onClick: onBulkUngroup,
-                                  },
-                                  { type: 'divider' as const },
                                   {
                                     key: 'enable',
                                     icon: <CheckCircleOutlined />,
@@ -1122,17 +973,11 @@ export default function ClientsPage() {
                                     label: t('pages.clients.adjust'),
                                     onClick: () => setBulkAdjustOpen(true),
                                   },
-                                  {
-                                    key: 'subLinks',
-                                    icon: <LinkOutlined />,
-                                    label: t('pages.clients.subLinks'),
-                                    onClick: () => setSubLinksOpen(true),
-                                  },
                                 ]
                                 : [
                                   {
                                     key: 'bulk',
-                                    icon: <UsergroupAddOutlined />,
+                                    icon: <TeamOutlined />,
                                     label: t('pages.clients.bulk'),
                                     onClick: () => setBulkAddOpen(true),
                                   },
@@ -1271,16 +1116,6 @@ export default function ClientsPage() {
                               {inboundLabel(id)}
                             </Tag>
                           ))}
-                          {filters.groups.map((g) => (
-                            <Tag
-                              key={`g-${g}`}
-                              closable
-                              color="geekblue"
-                              onClose={() => setFilters({ ...filters, groups: filters.groups.filter((x) => x !== g) })}
-                            >
-                              {t('pages.clients.group')}: {g}
-                            </Tag>
-                          ))}
                           {(filters.expiryFrom || filters.expiryTo) && (
                             <Tag closable color="purple" onClose={() => clearOneFilter('expiryFrom')}>
                               {t('pages.clients.expiryTime')}: {filters.expiryFrom ? IntlUtil.formatDate(filters.expiryFrom, datepicker) : '…'}
@@ -1296,11 +1131,6 @@ export default function ClientsPage() {
                           {filters.autoRenew && (
                             <Tag closable color="gold" onClose={() => clearOneFilter('autoRenew')}>
                               {t('pages.clients.renew')}: {filters.autoRenew === 'on' ? t('enabled') : t('disabled')}
-                            </Tag>
-                          )}
-                          {filters.hasTgId && (
-                            <Tag closable onClose={() => clearOneFilter('hasTgId')}>
-                              {t('pages.clients.telegramId')}: {filters.hasTgId === 'yes' ? t('pages.clients.has') : t('pages.clients.hasNot')}
                             </Tag>
                           )}
                           {filters.hasComment && (
@@ -1475,10 +1305,7 @@ export default function ClientsPage() {
             mode={formMode}
             client={editingClient}
             attachedIds={editingAttachedIds}
-            attachedExternalLinks={editingExternalLinks}
             inbounds={inbounds}
-            tgBotEnable={tgBotEnable}
-            groups={allGroups}
             save={onSave}
             resetTraffic={resetTraffic}
             onOpenChange={setFormOpen}
@@ -1490,7 +1317,6 @@ export default function ClientsPage() {
             client={infoClient}
             inboundsById={inboundsById}
             isOnline={infoClient ? isOnline(infoClient.email) : false}
-            subSettings={subSettings}
             onOpenChange={setInfoOpen}
           />
         </LazyMount>
@@ -1499,7 +1325,6 @@ export default function ClientsPage() {
             open={qrOpen}
             client={qrClient}
             inboundsById={inboundsById}
-            subSettings={subSettings}
             onOpenChange={setQrOpen}
           />
         </LazyMount>
@@ -1507,7 +1332,6 @@ export default function ClientsPage() {
           <ClientBulkAddModal
             open={bulkAddOpen}
             inbounds={inbounds}
-            groups={allGroups}
             onOpenChange={setBulkAddOpen}
             onSaved={() => setBulkAddOpen(false)}
           />
@@ -1522,31 +1346,6 @@ export default function ClientsPage() {
               if (msg?.success) {
                 setSelectedRowKeys([]);
                 return msg.obj ?? { adjusted: 0 };
-              }
-              return null;
-            }}
-          />
-        </LazyMount>
-        <LazyMount when={subLinksOpen}>
-          <SubLinksModal
-            open={subLinksOpen}
-            emails={selectedRowKeys}
-            clients={clients}
-            subSettings={subSettings}
-            onOpenChange={setSubLinksOpen}
-          />
-        </LazyMount>
-        <LazyMount when={bulkGroupOpen}>
-          <BulkAddToGroupModal
-            open={bulkGroupOpen}
-            count={selectedRowKeys.length}
-            groups={allGroups}
-            onOpenChange={setBulkGroupOpen}
-            onSubmit={async (group) => {
-              const msg = await bulkAddToGroup([...selectedRowKeys], group);
-              if (msg?.success) {
-                setSelectedRowKeys([]);
-                return (msg.obj as { affected?: number } | undefined) ?? { affected: 0 };
               }
               return null;
             }}
@@ -1592,8 +1391,6 @@ export default function ClientsPage() {
             onChange={setFilters}
             inbounds={inbounds}
             protocols={protocolOptions}
-            groups={groupOptions}
-            nodes={nodes}
           />
         </LazyMount>
         <LazyMount when={textOpen}>

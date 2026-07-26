@@ -39,11 +39,6 @@ export type DBInboundInit = Partial<{
     tag: string;
     sniffing: RawJsonField;
     clientStats: ClientStats[];
-    nodeId: number | null;
-    shareAddrStrategy: string;
-    shareAddr: string;
-    subSortIndex: number;
-    originNodeGuid: string;
     fallbackParent: FallbackParentRef | null;
 }>;
 
@@ -86,11 +81,6 @@ export class DBInbound {
     tag: string;
     sniffing: RawJsonField;
     clientStats: ClientStats[];
-    nodeId: number | null;
-    shareAddrStrategy: string;
-    shareAddr: string;
-    subSortIndex: number;
-    originNodeGuid: string;
     fallbackParent: FallbackParentRef | null;
 
     private _clientStatsMap: Map<string, ClientStats> | null = null;
@@ -115,11 +105,6 @@ export class DBInbound {
         this.tag = "";
         this.sniffing = "";
         this.clientStats = [];
-        this.nodeId = null;
-        this.shareAddrStrategy = "node";
-        this.shareAddr = "";
-        this.subSortIndex = 1;
-        this.originNodeGuid = "";
         this.fallbackParent = null;
         if (data == null) {
             return;

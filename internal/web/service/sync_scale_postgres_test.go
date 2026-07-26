@@ -42,11 +42,9 @@ func syncInboundOld(tx *gorm.DB, inboundId int, clients []model.Client) error {
 		} else {
 			row.Flow = incoming.Flow
 			row.SubID = incoming.SubID
-			row.LimitIP = incoming.LimitIP
 			row.TotalGB = incoming.TotalGB
 			row.ExpiryTime = incoming.ExpiryTime
 			row.Enable = incoming.Enable
-			row.TgID = incoming.TgID
 			row.Comment = incoming.Comment
 			row.Reset = incoming.Reset
 			preservedUpdatedAt := max(incoming.UpdatedAt, row.UpdatedAt)
@@ -212,58 +210,6 @@ func TestAddDelClientPostgresScale(t *testing.T) {
 
 			t.Logf("N=%-7d add=%-10v del=%-10v records=%d links=%d", n,
 				addDur.Round(time.Millisecond), delDur.Round(time.Millisecond), recCount, linkCount)
-		})
-	}
-}
-
-func TestGroupAndListPostgresScale(t *testing.T) {
-	setupScaleDB(t)
-
-	svc := &ClientService{}
-	sizes := []int{5000, 100000}
-
-	for _, n := range sizes {
-		t.Run(fmt.Sprintf("N=%d", n), func(t *testing.T) {
-			db := database.GetDB()
-			resetScaleTables(t, db, "inbounds", "clients", "client_inbounds", "client_traffics")
-			clients := makeScaleClients(n)
-			ib := &model.Inbound{Tag: fmt.Sprintf("grp-%d", n), Enable: true, Port: 40000, Protocol: model.VLESS, Settings: clientsSettings(t, clients)}
-			if err := db.Create(ib).Error; err != nil {
-				t.Fatalf("create inbound: %v", err)
-			}
-			if err := svc.SyncInbound(nil, ib.Id, clients); err != nil {
-				t.Fatalf("seed SyncInbound: %v", err)
-			}
-			db.Exec("ANALYZE")
-			emails := make([]string, n)
-			for i := range n {
-				emails[i] = clients[i].Email
-			}
-
-			start := time.Now()
-			if _, err := svc.AddToGroup(emails, "benchgroup"); err != nil {
-				t.Fatalf("AddToGroup: %v", err)
-			}
-			addDur := time.Since(start)
-
-			start = time.Now()
-			if _, err := svc.RemoveFromGroup(emails); err != nil {
-				t.Fatalf("RemoveFromGroup: %v", err)
-			}
-			rmDur := time.Since(start)
-
-			start = time.Now()
-			list, err := svc.List()
-			if err != nil {
-				t.Fatalf("List: %v", err)
-			}
-			listDur := time.Since(start)
-			if len(list) != n {
-				t.Fatalf("List returned %d, want %d", len(list), n)
-			}
-
-			t.Logf("N=%-7d bulkAdd=%-9v bulkRemove=%-9v list=%-9v", n,
-				addDur.Round(time.Millisecond), rmDur.Round(time.Millisecond), listDur.Round(time.Millisecond))
 		})
 	}
 }

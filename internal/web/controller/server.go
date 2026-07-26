@@ -8,12 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/entity"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -26,8 +23,6 @@ type ServerController struct {
 	BaseController
 
 	serverService      service.ServerService
-	settingService     service.SettingService
-	panelService       panel.PanelService
 	xrayMetricsService service.XrayMetricsService
 }
 
@@ -49,29 +44,17 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.GET("/xrayMetricsHistory/:metric/:bucket", a.getXrayMetricsHistoryBucket)
 	g.GET("/xrayObservatory", a.getXrayObservatory)
 	g.GET("/xrayObservatoryHistory/:tag/:bucket", a.getXrayObservatoryHistoryBucket)
-	g.GET("/getXrayVersion", a.getXrayVersion)
-	g.GET("/getPanelUpdateInfo", a.getPanelUpdateInfo)
-	g.GET("/getUpdateStatus", a.getUpdateStatus)
 	g.GET("/getConfigJson", a.getConfigJson)
 	g.GET("/getDb", a.getDb)
 	g.GET("/getMigration", a.getMigration)
 	g.GET("/getNewUUID", a.getNewUUID)
-	g.GET("/getWebCertFiles", a.getWebCertFiles)
-	g.GET("/descendants", a.descendants)
 	g.GET("/getNewX25519Cert", a.getNewX25519Cert)
 	g.GET("/getNewmldsa65", a.getNewmldsa65)
 	g.GET("/getNewmlkem768", a.getNewmlkem768)
 	g.GET("/getNewVlessEnc", a.getNewVlessEnc)
-	g.GET("/clientIps", a.getClientIps)
-	g.GET("/fail2banStatus", a.getFail2banStatus)
 
 	g.POST("/stopXrayService", a.stopXrayService)
 	g.POST("/restartXrayService", a.restartXrayService)
-	g.POST("/installXray/:version", a.installXray)
-	g.POST("/updatePanel", a.updatePanel)
-	g.POST("/setUpdateChannel", a.setUpdateChannel)
-	g.POST("/updateGeofile", a.updateGeofile)
-	g.POST("/updateGeofile/:fileName", a.updateGeofile)
 	g.POST("/logs/:count", a.getLogs)
 	g.POST("/xraylogs/:count", a.getXrayLogs)
 	g.POST("/importDB", a.importDB)
@@ -80,7 +63,6 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/getRemoteCertHash", a.getRemoteCertHash)
 	g.POST("/scanRealityTarget", a.scanRealityTarget)
 	g.POST("/scanRealityTargets", a.scanRealityTargets)
-	g.POST("/clientIps", a.setClientIps)
 }
 
 // startTask registers the @2s ticker that refreshes server status, samples
@@ -88,7 +70,14 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 // State + sampling live in ServerService; the controller only orchestrates
 // the cross-service side effects (xrayMetrics sample + websocket broadcast).
 func (a *ServerController) startTask() {
-	c := global.GetWebServer().GetCron()
+	server := global.GetWebServer()
+	if server == nil {
+		return
+	}
+	c := server.GetCron()
+	if c == nil {
+		return
+	}
 	_, _ = c.AddFunc("@every 2s", func() {
 		status := a.serverService.RefreshStatus()
 		if status == nil {
@@ -106,10 +95,6 @@ func (a *ServerController) startTask() {
 
 // status returns the current server status information.
 func (a *ServerController) status(c *gin.Context) { jsonObj(c, a.serverService.LastStatus(), nil) }
-
-func (a *ServerController) getFail2banStatus(c *gin.Context) {
-	jsonObj(c, a.serverService.GetFail2banStatus(), nil)
-}
 
 func parseHistoryBucket(c *gin.Context) (int, bool) {
 	bucket, err := strconv.Atoi(c.Param("bucket"))
@@ -181,90 +166,6 @@ func (a *ServerController) getXrayObservatoryHistoryBucket(c *gin.Context) {
 	jsonObj(c, a.xrayMetricsService.AggregateObservatory(tag, bucket, 60), nil)
 }
 
-func (a *ServerController) getXrayVersion(c *gin.Context) {
-	versions, err := a.serverService.GetXrayVersionsCached()
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "getVersion"), err)
-		return
-	}
-	jsonObj(c, versions, nil)
-}
-
-// getPanelUpdateInfo retrieves the current and latest panel version.
-func (a *ServerController) getPanelUpdateInfo(c *gin.Context) {
-	info, err := a.panelService.GetUpdateInfo()
-	if err != nil {
-		logger.Debug("panel update check failed:", err)
-		c.JSON(http.StatusOK, entity.Msg{Success: false})
-		return
-	}
-	jsonObj(c, info, nil)
-}
-
-// installXray installs or updates Xray to the specified version.
-func (a *ServerController) installXray(c *gin.Context) {
-	version := c.Param("version")
-	err := a.serverService.UpdateXray(version)
-	jsonMsg(c, I18nWeb(c, "pages.index.xraySwitchVersionPopover"), err)
-}
-
-// updatePanel starts a panel self-update. With no "dev" form value it follows
-// this panel's own channel setting; an explicit "dev" (sent by the master node
-// updater) overrides it for this run. The response's runId identifies this
-// update for a later getUpdateStatus poll.
-func (a *ServerController) updatePanel(c *gin.Context) {
-	devParam := c.PostForm("dev")
-	var runID int64
-	var err error
-	if devParam == "" {
-		runID, err = a.panelService.StartUpdate()
-	} else {
-		dev, perr := strconv.ParseBool(devParam)
-		if perr != nil {
-			jsonMsg(c, "invalid data", perr)
-			return
-		}
-		runID, err = a.panelService.StartUpdateChannel(dev)
-	}
-	var obj any
-	if err == nil {
-		obj = gin.H{"runId": strconv.FormatInt(runID, 10)}
-	}
-	jsonMsgObj(c, I18nWeb(c, "pages.index.panelUpdateStartedPopover"), obj, err)
-}
-
-// getUpdateStatus reports the outcome of the most recently launched panel
-// self-update (see updatePanel). Compare the returned runId against the one
-// updatePanel returned to tell this run's result apart from a stale one.
-func (a *ServerController) getUpdateStatus(c *gin.Context) {
-	jsonObj(c, a.panelService.GetUpdateStatus(), nil)
-}
-
-// setUpdateChannel toggles whether self-update tracks the rolling dev release.
-func (a *ServerController) setUpdateChannel(c *gin.Context) {
-	dev, err := strconv.ParseBool(c.PostForm("dev"))
-	if err != nil {
-		jsonMsg(c, "invalid data", err)
-		return
-	}
-	err = a.settingService.SetDevChannelEnable(dev)
-	jsonMsg(c, I18nWeb(c, "pages.index.updateChannelChanged"), err)
-}
-
-// updateGeofile updates the specified geo file for Xray.
-func (a *ServerController) updateGeofile(c *gin.Context) {
-	fileName := c.Param("fileName")
-
-	if fileName != "" && !a.serverService.IsValidGeofileName(fileName) {
-		jsonMsg(c, I18nWeb(c, "pages.index.geofileUpdatePopover"),
-			fmt.Errorf("invalid filename: contains unsafe characters or path traversal patterns"))
-		return
-	}
-
-	err := a.serverService.UpdateGeofile(fileName)
-	jsonMsg(c, I18nWeb(c, "pages.index.geofileUpdatePopover"), err)
-}
-
 // stopXrayService stops the Xray service.
 func (a *ServerController) stopXrayService(c *gin.Context) {
 	err := a.serverService.StopXrayService()
@@ -299,9 +200,9 @@ func (a *ServerController) restartXrayService(c *gin.Context) {
 	)
 }
 
-// getLogs retrieves the application logs based on count, level, and syslog filters.
+// getLogs retrieves the in-process application logs based on count and level.
 func (a *ServerController) getLogs(c *gin.Context) {
-	logs := a.serverService.GetLogs(c.Param("count"), c.PostForm("level"), c.PostForm("syslog"))
+	logs := a.serverService.GetLogs(c.Param("count"), c.PostForm("level"))
 	jsonObj(c, logs, nil)
 }
 
@@ -380,32 +281,6 @@ func (a *ServerController) importDB(c *gin.Context) {
 		return
 	}
 	jsonObj(c, I18nWeb(c, "pages.index.importDatabaseSuccess"), nil)
-}
-
-// descendants publishes read-only summaries of the nodes this panel manages so
-// a parent panel can surface them as transitive sub-nodes in a chained
-// topology. Called by the parent via the node's API token (#4983).
-func (a *ServerController) descendants(c *gin.Context) {
-	data, err := (&service.NodeService{}).LocalDescendants()
-	jsonObj(c, data, err)
-}
-
-// getWebCertFiles returns this panel's own web TLS certificate and key file
-// paths. The central panel calls it on a node (via the node's API token) so
-// "Set Cert from Panel" can fill a node-assigned inbound with paths that exist
-// on the node's filesystem instead of the central panel's — see issue #4854.
-func (a *ServerController) getWebCertFiles(c *gin.Context) {
-	certFile, err := a.settingService.GetCertFile()
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	keyFile, err := a.settingService.GetKeyFile()
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
-		return
-	}
-	jsonObj(c, gin.H{"webCertFile": certFile, "webKeyFile": keyFile}, nil)
 }
 
 // getNewX25519Cert generates a new X25519 certificate.
@@ -512,19 +387,4 @@ func (a *ServerController) getNewmlkem768(c *gin.Context) {
 		return
 	}
 	jsonObj(c, out, nil)
-}
-
-func (a *ServerController) getClientIps(c *gin.Context) {
-	ips, err := (&service.InboundService{}).GetAllInboundClientIps()
-	jsonObj(c, ips, err)
-}
-
-func (a *ServerController) setClientIps(c *gin.Context) {
-	var ips []model.InboundClientIps
-	if err := c.ShouldBindJSON(&ips); err != nil {
-		jsonMsg(c, "invalid data", err)
-		return
-	}
-	err := (&service.InboundService{}).MergeInboundClientIps(ips)
-	jsonMsg(c, "Client IPs merged", err)
 }

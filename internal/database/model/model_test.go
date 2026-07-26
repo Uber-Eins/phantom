@@ -149,46 +149,6 @@ func TestClientRecordUnmarshalJSONAcceptsBothShapes(t *testing.T) {
 	}
 }
 
-func TestInboundClientIpsMarshalJSONNestsArray(t *testing.T) {
-	row := InboundClientIps{Id: 1, ClientEmail: "alice@example.com", Ips: `[{"ip":"1.2.3.4","timestamp":1700000000}]`}
-	out, err := json.Marshal(row)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(out, &parsed); err != nil {
-		t.Fatalf("output is not valid JSON: %v", err)
-	}
-	arr, ok := parsed["ips"].([]any)
-	if !ok {
-		t.Fatalf("expected ips to marshal as a JSON array, got %T", parsed["ips"])
-	}
-	if len(arr) != 1 {
-		t.Errorf("expected 1 entry, got %d", len(arr))
-	}
-}
-
-func TestInboundClientIpsUnmarshalJSONAcceptsBothShapes(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-	}{
-		{name: "nested array", body: `{"id":1,"ips":[{"ip":"1.2.3.4","timestamp":1}]}`},
-		{name: "legacy string", body: `{"id":1,"ips":"[{\"ip\":\"1.2.3.4\",\"timestamp\":1}]"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var row InboundClientIps
-			if err := json.Unmarshal([]byte(tc.body), &row); err != nil {
-				t.Fatalf("Unmarshal failed: %v", err)
-			}
-			if !strings.Contains(row.Ips, `"ip":"1.2.3.4"`) {
-				t.Errorf("Ips not normalised: %q", row.Ips)
-			}
-		})
-	}
-}
-
 func TestStripInboundXhttpClientFields_RemovesClientOnlyKnobs(t *testing.T) {
 	stream := `{
 		"network": "xhttp",

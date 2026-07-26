@@ -13,7 +13,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Read-only modal for viewing generated text or JSON — a client config, subscription, or exported settings — with copy and optional download actions, plus optional tabs for multiple documents.',
+          'Read-only modal for viewing generated text or JSON — a client config, connection link, or exported settings — with copy and optional download actions, plus optional tabs for multiple documents.',
       },
     },
   },

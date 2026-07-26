@@ -24,13 +24,10 @@ Link related issues here: "Closes #123", "Refs #456".
 - [ ] Frontend (UI / panel pages)
 - [ ] Backend (API endpoints, login, settings)
 - [ ] Xray config generation
-- [ ] Subscription (share links / Clash / JSON)
+- [ ] Local client share links / QR codes
 - [ ] Statistics / traffic counters
 - [ ] Database / migrations
-- [ ] Install / upgrade script
-- [ ] Docker image
-- [ ] Multi-node (sub-nodes)
-- [ ] Telegram bot
+- [ ] OCI image / Quadlet
 
 ## How was this tested?
 
@@ -58,6 +55,6 @@ Write "None" if there are no breaking changes.
 - [ ] I added or updated tests for the new behavior (when applicable).
 - [ ] `go build ./...` and the test suite pass locally.
 - [ ] For frontend changes: `npm run lint`, `npm run typecheck`, and `npm run build` pass.
-- [ ] I updated the Wiki / README / API docs if user-facing behavior changed.
+- [ ] I updated the README if user-facing behavior changed.
 - [ ] My commits follow the project's existing message style.
 - [ ] I have no unrelated changes mixed into this PR.

@@ -211,9 +211,9 @@ func TestRefreshLocalOnline_GraceBoundaryEmails(t *testing.T) {
 	p.RefreshLocalOnline([]string{"edge"}, nil, 0, grace)
 	// now-ts == grace exactly: age is not strictly < grace, so it must drop.
 	p.RefreshLocalOnline(nil, nil, grace, grace)
-	for _, e := range p.GetLocalOnlineClients() {
+	for _, e := range p.GetOnlineClients() {
 		if e == "edge" {
-			t.Fatalf("email idle exactly graceMs must age out (half-open window), got online %v", p.GetLocalOnlineClients())
+			t.Fatalf("email idle exactly graceMs must age out (half-open window), got online %v", p.GetOnlineClients())
 		}
 	}
 
@@ -221,8 +221,8 @@ func TestRefreshLocalOnline_GraceBoundaryEmails(t *testing.T) {
 	p2 := newOnlineTestProcess()
 	p2.RefreshLocalOnline([]string{"edge"}, nil, 0, grace)
 	p2.RefreshLocalOnline(nil, nil, grace-1, grace)
-	if !containsString(p2.GetLocalOnlineClients(), "edge") {
-		t.Fatalf("email idle graceMs-1 must still be online, got %v", p2.GetLocalOnlineClients())
+	if !containsString(p2.GetOnlineClients(), "edge") {
+		t.Fatalf("email idle graceMs-1 must still be online, got %v", p2.GetOnlineClients())
 	}
 }
 

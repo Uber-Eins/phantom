@@ -34,18 +34,6 @@ func TestUpdate_PersistsFields_NoInbound(t *testing.T) {
 			want:     int64(1700000000),
 		},
 		{
-			name:     "limitIp",
-			mutate:   func(c *model.Client) { c.LimitIP = 7 },
-			readBack: func(rec *model.ClientRecord) any { return rec.LimitIP },
-			want:     7,
-		},
-		{
-			name:     "tgId",
-			mutate:   func(c *model.Client) { c.TgID = 9876543210 },
-			readBack: func(rec *model.ClientRecord) any { return rec.TgID },
-			want:     int64(9876543210),
-		},
-		{
 			name:     "comment cleared to empty",
 			mutate:   func(c *model.Client) { c.Comment = "" },
 			readBack: func(rec *model.ClientRecord) any { return rec.Comment },
@@ -90,8 +78,6 @@ func TestUpdate_PersistsFields_NoInbound(t *testing.T) {
 				SubID:      email,
 				TotalGB:    5,
 				ExpiryTime: 1000,
-				LimitIP:    1,
-				TgID:       1,
 				Comment:    "seeded",
 				Reset:      1,
 				Flow:       "seeded-flow",
@@ -173,7 +159,6 @@ func TestApplyClientRecordMerge_MirrorsSyncInboundRules(t *testing.T) {
 		Password: "kept-pw",
 		Flow:     "kept-flow",
 		TotalGB:  9,
-		Group:    "kept-group",
 		Comment:  "kept-comment",
 	}
 	incoming := &model.ClientRecord{
@@ -195,9 +180,6 @@ func TestApplyClientRecordMerge_MirrorsSyncInboundRules(t *testing.T) {
 	}
 	if row.TotalGB != 0 {
 		t.Fatalf("incoming TotalGB is unconditional and should overwrite with zero, got %v", row.TotalGB)
-	}
-	if row.Group != "kept-group" {
-		t.Fatalf("empty incoming Group should preserve stored group, got %q", row.Group)
 	}
 	if row.Comment != "new-comment" {
 		t.Fatalf("incoming Comment is unconditional and should overwrite, got %q", row.Comment)

@@ -1,5 +1,3 @@
-import type { SubSettings } from '../useInbounds';
-
 export interface ClientStats {
   email: string;
   up: number;
@@ -19,9 +17,7 @@ export interface ClientSetting {
   totalGB?: number;
   expiryTime?: number;
   comment?: string;
-  tgId?: string;
   enable?: boolean;
-  limitIp?: number;
   created_at?: number;
   updated_at?: number;
 }
@@ -78,9 +74,5 @@ export interface InboundInfoModalProps {
   clientIndex?: number;
   expireDiff?: number;
   trafficDiff?: number;
-  ipLimitEnable?: boolean;
-  tgBotEnable?: boolean;
-  nodeAddress?: string;
-  subSettings?: SubSettings;
   lastOnlineMap?: Record<string, number>;
 }

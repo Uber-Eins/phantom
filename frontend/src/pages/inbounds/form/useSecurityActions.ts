@@ -7,18 +7,12 @@ import { HttpUtil, RandomUtil } from '@/utils';
 import { createTlsSettingsWithDefaultCert } from '@/lib/xray/inbound-tls-defaults';
 import { RealityStreamSettingsSchema } from '@/schemas/protocols/security/reality';
 import type { InboundFormValues } from '@/schemas/forms/inbound-form';
-import type { RealityScanResult } from '@/generated/types';
+import type { RealityScanResult } from '@/models/reality-scan';
 
 interface UseSecurityActionsArgs {
   methods: UseFormReturn<InboundFormValues>;
   setSaving: Dispatch<SetStateAction<boolean>>;
   messageApi: MessageInstance;
-  /*
-   * Node the inbound is deployed to (null = central panel). "Set Cert from
-   * Panel" must read the node's own cert paths for a node-assigned inbound —
-   * the central panel's paths don't exist on the node. See issue #4854.
-   */
-  nodeId: number | null;
   setScanResult: Dispatch<SetStateAction<RealityScanResult | null>>;
   setScanning: Dispatch<SetStateAction<boolean>>;
 }
@@ -29,7 +23,7 @@ interface UseSecurityActionsArgs {
  * writes the result back into the form. Lifted out of InboundFormModal so
  * the modal body stays focused on orchestration.
  */
-export function useSecurityActions({ methods, setSaving, messageApi, nodeId, setScanResult, setScanning }: UseSecurityActionsArgs) {
+export function useSecurityActions({ methods, setSaving, messageApi, setScanResult, setScanning }: UseSecurityActionsArgs) {
   const { t } = useTranslation();
   const setValue = methods.setValue as unknown as (name: string, value: unknown) => void;
   const getValues = methods.getValues as unknown as (name?: string) => unknown;
@@ -234,13 +228,7 @@ export function useSecurityActions({ methods, setSaving, messageApi, nodeId, set
   const setCertFromPanel = async (certName: number) => {
     setSaving(true);
     try {
-      /*
-       * Node-assigned inbounds run on the node, so their cert files must be the
-       * node's own paths (fetched through the central panel), not this panel's.
-       */
-      const msg = typeof nodeId === 'number'
-        ? await HttpUtil.get(`/panel/api/nodes/webCert/${nodeId}`, undefined, { silent: true })
-        : await HttpUtil.post('/panel/api/setting/all', undefined, { silent: true });
+      const msg = await HttpUtil.post('/panel/api/setting/all', undefined, { silent: true });
       if (!msg?.success) {
         messageApi.warning(msg?.msg || t('pages.inbounds.setDefaultCertEmpty'));
         return;

@@ -7,18 +7,21 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 	_ "unsafe"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
+	"github.com/mhsanaei/3x-ui/v3/internal/healthcheck"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/sub"
+	"github.com/mhsanaei/3x-ui/v3/internal/share"
 	"github.com/mhsanaei/3x-ui/v3/internal/tunnelmonitor"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/crypto"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
@@ -26,9 +29,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/tgbot"
 
-	"github.com/joho/godotenv"
 	"github.com/op/go-logging"
 )
 
@@ -50,8 +51,6 @@ func runWebServer() {
 	default:
 		log.Fatalf("Unknown log level: %v", config.GetLogLevel())
 	}
-
-	_ = godotenv.Load()
 
 	for _, line := range sys.ApplyMemoryTuning() {
 		logger.Info(line)
@@ -80,16 +79,7 @@ func runWebServer() {
 		return
 	}
 
-	var subServer *sub.Server
-	sub.SetDistFS(web.EmbeddedDist())
-	service.RegisterSubLinkProvider(sub.NewLinkProvider())
-	subServer = sub.NewServer()
-	global.SetSubServer(subServer)
-	err = subServer.Start()
-	if err != nil {
-		log.Fatalf("Error starting sub server: %v", err)
-		return
-	}
+	service.RegisterLinkProvider(share.NewLinkProvider())
 
 	sigCh := make(chan os.Signal, 8)
 	// Trap shutdown signals
@@ -132,11 +122,6 @@ func runWebServer() {
 			if err != nil {
 				logger.Debug("Error stopping web server:", err)
 			}
-			err = subServer.Stop()
-			if err != nil {
-				logger.Debug("Error stopping sub server:", err)
-			}
-
 			server = web.NewServer()
 			global.SetWebServer(server)
 			err = server.StartPanelOnly()
@@ -146,15 +131,6 @@ func runWebServer() {
 			}
 			log.Println("Web server restarted successfully.")
 
-			sub.SetDistFS(web.EmbeddedDist())
-			subServer = sub.NewServer()
-			global.SetSubServer(subServer)
-			err = subServer.Start()
-			if err != nil {
-				log.Fatalf("Error restarting sub server: %v", err)
-				return
-			}
-			log.Println("Sub server restarted successfully.")
 		case sys.SIGUSR1:
 			logger.Info("Received USR1 signal, restarting xray-core...")
 			err := server.RestartXray()
@@ -167,12 +143,7 @@ func runWebServer() {
 				stopTunnelHealthMonitor()
 			}
 
-			// --- FIX FOR TELEGRAM BOT CONFLICT (409) on full shutdown ---
-			tgbot.StopBot()
-			// ------------------------------------------------------------
-
 			_ = server.Stop()
-			_ = subServer.Stop()
 			log.Println("Shutting down servers.")
 			return
 		}
@@ -245,64 +216,6 @@ func showSetting(show bool) {
 		fmt.Println("hasDefaultCredential:", hasDefaultCredential)
 		fmt.Println("port:", port)
 		fmt.Println("webBasePath:", webBasePath)
-	}
-}
-
-// updateTgbotEnableSts enables or disables the Telegram bot notifications based on the status parameter.
-func updateTgbotEnableSts(status bool) {
-	settingService := service.SettingService{}
-	currentTgSts, err := settingService.GetTgbotEnabled()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	logger.Infof("current enabletgbot status[%v],need update to status[%v]", currentTgSts, status)
-	if currentTgSts != status {
-		err := settingService.SetTgbotEnabled(status)
-		if err != nil {
-			fmt.Println(err)
-			return
-		} else {
-			logger.Infof("SetTgbotEnabled[%v] success", status)
-		}
-	}
-}
-
-// updateTgbotSetting updates Telegram bot settings including token, chat ID, and runtime schedule.
-func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
-	err := database.InitDB(config.GetDBPath())
-	if err != nil {
-		fmt.Println("Error initializing database:", err)
-		return
-	}
-
-	settingService := service.SettingService{}
-
-	if tgBotToken != "" {
-		err := settingService.SetTgBotToken(tgBotToken)
-		if err != nil {
-			fmt.Printf("Error setting Telegram bot token: %v\n", err)
-			return
-		}
-		logger.Info("Successfully updated Telegram bot token.")
-	}
-
-	if tgBotRuntime != "" {
-		err := settingService.SetTgbotRuntime(tgBotRuntime)
-		if err != nil {
-			fmt.Printf("Error setting Telegram bot runtime: %v\n", err)
-			return
-		}
-		logger.Infof("Successfully updated Telegram bot runtime to [%s].", tgBotRuntime)
-	}
-
-	if tgBotChatid != "" {
-		err := settingService.SetTgBotChatId(tgBotChatid)
-		if err != nil {
-			fmt.Printf("Error setting Telegram bot chat ID: %v\n", err)
-			return
-		}
-		logger.Info("Successfully updated Telegram bot chat ID.")
 	}
 }
 
@@ -391,19 +304,6 @@ func updateCert(publicKey string, privateKey string) {
 			fmt.Println("set certificate private key success")
 		}
 
-		err = settingService.SetSubCertFile(publicKey)
-		if err != nil {
-			fmt.Println("set certificate for subscription public key failed:", err)
-		} else {
-			fmt.Println("set certificate for subscription public key success")
-		}
-
-		err = settingService.SetSubKeyFile(privateKey)
-		if err != nil {
-			fmt.Println("set certificate for subscription private key failed:", err)
-		} else {
-			fmt.Println("set certificate for subscription private key success")
-		}
 	} else {
 		fmt.Println("both public and private key should be entered.")
 	}
@@ -442,44 +342,6 @@ func GetListenIP(getListen bool) {
 	}
 }
 
-func GetApiToken(getApiToken bool) {
-	if !getApiToken {
-		return
-	}
-	err := database.InitDB(config.GetDBPath())
-	if err != nil {
-		fmt.Println("open database failed, error info:", err)
-		return
-	}
-	apiTokenService := panel.ApiTokenService{}
-	tokens, err := apiTokenService.List()
-	if err != nil {
-		fmt.Println("get apiToken failed, error info:", err)
-		return
-	}
-	if len(tokens) > 0 {
-		fmt.Printf("There are %d API token(s) configured. Existing tokens cannot be retrieved in plaintext because only hashes are stored.\n", len(tokens))
-		fmt.Println("If you have lost your token, you can manage and generate new tokens through the Panel UI (Settings -> API Tokens).")
-
-		// Create a new fallback token so the CLI is still useful without the UI
-		fallbackName := fmt.Sprintf("cli-fallback-%d", time.Now().Unix())
-		created, err := apiTokenService.Create(fallbackName)
-		if err != nil {
-			fmt.Println("Failed to create a fallback API token:", err)
-			return
-		}
-		fmt.Println("\nA new fallback token has been generated for your convenience:")
-		fmt.Println("apiToken:", created.Token)
-		return
-	}
-	created, err := apiTokenService.Create("install")
-	if err != nil {
-		fmt.Println("create apiToken failed, error info:", err)
-		return
-	}
-	fmt.Println("apiToken:", created.Token)
-}
-
 // migrateDb performs database migration operations for the 3x-ui panel.
 func migrateDb() {
 	inboundService := service.InboundService{}
@@ -494,27 +356,9 @@ func migrateDb() {
 	fmt.Println("Migration done!")
 }
 
-// loadServiceEnvFile loads the systemd EnvironmentFile so CLI subcommands like
-// "x-ui setting" hit the same database backend as the panel. godotenv.Load does
-// not override variables already in the environment, so it is a no-op for the
-// systemd-managed service.
-func loadServiceEnvFile() {
-	for _, path := range config.GetEnvFilePaths() {
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		if err := godotenv.Load(path); err != nil {
-			log.Printf("warning: failed to load env file %s: %v", path, err)
-		}
-		return
-	}
-}
-
 // main is the entry point of the 3x-ui application.
 // It parses command-line arguments to run the web server, migrate database, or update settings.
 func main() {
-	loadServiceEnvFile()
-
 	if len(os.Args) < 2 {
 		runWebServer()
 		return
@@ -524,6 +368,10 @@ func main() {
 	flag.BoolVar(&showVersion, "v", false, "show version")
 
 	runCmd := flag.NewFlagSet("run", flag.ExitOnError)
+
+	healthcheckCmd := flag.NewFlagSet("healthcheck", flag.ExitOnError)
+	var healthcheckPort int
+	healthcheckCmd.IntVar(&healthcheckPort, "port", 0, "Panel port (defaults to XUI_PORT or 2053)")
 
 	migrateDbCmd := flag.NewFlagSet("migrate-db", flag.ExitOnError)
 	var migrateDsn string
@@ -546,14 +394,9 @@ func main() {
 	var getListen bool
 	var webCertFile string
 	var webKeyFile string
-	var tgbottoken string
-	var tgbotchatid string
-	var enabletgbot bool
-	var tgbotRuntime string
 	var reset bool
 	var show bool
 	var getCert bool
-	var getApiToken bool
 	var resetTwoFactor bool
 	settingCmd.BoolVar(&reset, "reset", false, "Reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "Display current settings")
@@ -565,13 +408,8 @@ func main() {
 	settingCmd.BoolVar(&resetTwoFactor, "resetTwoFactor", false, "Reset two-factor authentication settings")
 	settingCmd.BoolVar(&getListen, "getListen", false, "Display current panel listenIP IP")
 	settingCmd.BoolVar(&getCert, "getCert", false, "Display current certificate settings")
-	settingCmd.BoolVar(&getApiToken, "getApiToken", false, "Display current API token")
 	settingCmd.StringVar(&webCertFile, "webCert", "", "Set path to public key file for panel")
 	settingCmd.StringVar(&webKeyFile, "webCertKey", "", "Set path to private key file for panel")
-	settingCmd.StringVar(&tgbottoken, "tgbottoken", "", "Set token for Telegram bot")
-	settingCmd.StringVar(&tgbotRuntime, "tgbotRuntime", "", "Set cron time for Telegram bot notifications")
-	settingCmd.StringVar(&tgbotchatid, "tgbotchatid", "", "Set chat ID for Telegram bot notifications")
-	settingCmd.BoolVar(&enabletgbot, "enabletgbot", false, "Enable notifications via Telegram bot")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -579,6 +417,7 @@ func main() {
 		fmt.Println()
 		fmt.Println("Commands:")
 		fmt.Println("    run            run web panel")
+		fmt.Println("    healthcheck    probe the local panel over HTTP or HTTPS")
 		fmt.Println("    migrate        migrate form other/old x-ui")
 		fmt.Println("    migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)")
 		fmt.Println("    setting        set settings")
@@ -598,6 +437,33 @@ func main() {
 			return
 		}
 		runWebServer()
+	case "healthcheck":
+		if err := healthcheckCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Println(err)
+			os.Exit(2)
+		}
+		if healthcheckPort == 0 {
+			if envPort, configured, err := config.GetPortOverride(); configured {
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(2)
+				}
+				healthcheckPort = envPort
+			} else {
+				healthcheckPort = 2053
+			}
+		}
+		if healthcheckPort < 1 || healthcheckPort > 65535 {
+			fmt.Println("healthcheck port must be between 1 and 65535")
+			os.Exit(2)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(healthcheckPort))
+		if err := healthcheck.Check(ctx, address); err != nil {
+			fmt.Println("panel is unhealthy:", err)
+			os.Exit(1)
+		}
 	case "migrate":
 		migrateDb()
 	case "migrate-db":
@@ -660,15 +526,6 @@ func main() {
 		}
 		if getCert {
 			GetCertificate(getCert)
-		}
-		if getApiToken {
-			GetApiToken(getApiToken)
-		}
-		if (tgbottoken != "") || (tgbotchatid != "") || (tgbotRuntime != "") {
-			updateTgbotSetting(tgbottoken, tgbotchatid, tgbotRuntime)
-		}
-		if enabletgbot {
-			updateTgbotEnableSts(enabletgbot)
 		}
 	case "cert":
 		err := settingCmd.Parse(os.Args[2:])

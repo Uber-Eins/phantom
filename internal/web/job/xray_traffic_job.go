@@ -1,18 +1,14 @@
 package job
 
 import (
-	"encoding/json"
-
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/outbound"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
-
-	"github.com/valyala/fasthttp"
 )
 
-// XrayTrafficJob collects and processes traffic statistics from Xray, updating the database and optionally informing external APIs.
+// XrayTrafficJob collects local Xray traffic and updates the panel database.
 type XrayTrafficJob struct {
 	settingService  service.SettingService
 	xrayService     service.XrayService
@@ -65,19 +61,12 @@ func (j *XrayTrafficJob) Run() {
 		}
 		websocket.BroadcastInvalidate(websocket.MessageTypeInbounds)
 	}
-	if ExternalTrafficInformEnable, err := j.settingService.GetExternalTrafficInformEnable(); ExternalTrafficInformEnable {
-		j.informTrafficToExternalAPI(traffics, clientTraffics)
-	} else if err != nil {
-		logger.Warning("get ExternalTrafficInformEnable failed:", err)
-	}
 	if needRestart0 || needRestart1 {
 		j.xrayService.SetToNeedRestart()
 	}
 
-	// Derive the local online set from this poll's per-email deltas rather
-	// than the shared last_online column, which remote-node syncs also bump
-	// and would otherwise make a client active only on a remote node appear
-	// online on local inbounds.
+	// Derive the online set from this poll's per-email deltas rather than the
+	// last_online column, which intentionally outlives a single polling cycle.
 	activeEmails := make([]string, 0, len(clientTraffics))
 	deltaActive := make(map[string]bool, len(clientTraffics))
 	for _, ct := range clientTraffics {
@@ -171,8 +160,6 @@ func (j *XrayTrafficJob) Run() {
 		"traffics":       traffics,
 		"clientTraffics": clientTraffics,
 		"onlineClients":  onlineClients,
-		"onlineByGuid":   j.inboundService.GetOnlineClientsByGuid(),
-		"activeInbounds": j.inboundService.GetActiveInboundsByGuid(),
 		"lastOnlineMap":  lastOnlineMap,
 	})
 
@@ -193,34 +180,5 @@ func (j *XrayTrafficJob) Run() {
 		websocket.BroadcastOutbounds(updatedOutbounds)
 	} else if err != nil {
 		logger.Warning("get all outbounds for websocket failed:", err)
-	}
-}
-
-func (j *XrayTrafficJob) informTrafficToExternalAPI(inboundTraffics []*xray.Traffic, clientTraffics []*xray.ClientTraffic) {
-	informURL, err := j.settingService.GetExternalTrafficInformURI()
-	if err != nil {
-		logger.Warning("get ExternalTrafficInformURI failed:", err)
-		return
-	}
-	informURL, err = service.SanitizePublicHTTPURL(informURL, false)
-	if err != nil {
-		logger.Warning("ExternalTrafficInformURI blocked:", err)
-		return
-	}
-	requestBody, err := json.Marshal(map[string]any{"clientTraffics": clientTraffics, "inboundTraffics": inboundTraffics})
-	if err != nil {
-		logger.Warning("parse client/inbound traffic failed:", err)
-		return
-	}
-	request := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(request)
-	request.Header.SetMethod("POST")
-	request.Header.SetContentType("application/json; charset=UTF-8")
-	request.SetBody(requestBody)
-	request.SetRequestURI(informURL)
-	response := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(response)
-	if err := fasthttp.Do(request, response); err != nil {
-		logger.Warning("POST ExternalTrafficInformURI failed:", err)
 	}
 }

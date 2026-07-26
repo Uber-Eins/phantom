@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -15,7 +16,8 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/crypto"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/middleware"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 )
 
@@ -43,7 +45,7 @@ func newAPIAuthTestEngine(t *testing.T) (*gin.Engine, *APIController) {
 	// Logs in as the first user so the session path can be exercised over a
 	// cookie round-trip without reaching into checkAPIAuth's internals.
 	engine.GET("/test-login", func(c *gin.Context) {
-		u, err := a.userService.GetFirstUser()
+		u, err := (&panel.UserService{}).GetFirstUser()
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			return
@@ -54,80 +56,56 @@ func newAPIAuthTestEngine(t *testing.T) (*gin.Engine, *APIController) {
 		}
 		c.Status(http.StatusOK)
 	})
+	engine.GET("/csrf-token", func(c *gin.Context) {
+		if !session.IsLogin(c) {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		token, err := session.EnsureCSRFToken(c)
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"token": token})
+	})
 
 	api := engine.Group("/panel/api")
 	api.Use(a.checkAPIAuth)
+	api.Use(middleware.CSRFMiddleware())
 	api.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"api_authed": c.GetBool("api_authed")})
+		c.Status(http.StatusOK)
 	})
+	api.POST("/mutate", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	return engine, a
 }
 
-// TestCheckAPIAuth_BearerSuccess characterizes the bearer-token path: a valid
-// token reaches the handler and sets api_authed (the contract the later
-// client-cert branch must match).
-func TestCheckAPIAuth_BearerSuccess(t *testing.T) {
+func TestCheckAPIAuthRejectsBearer(t *testing.T) {
 	engine, _ := newAPIAuthTestEngine(t)
 
-	const plaintext = "characterization-token-value"
-	if err := database.GetDB().Create(&model.ApiToken{
-		Name:    "t1",
-		Token:   crypto.HashTokenSHA256(plaintext),
-		Enabled: true,
-	}).Error; err != nil {
-		t.Fatalf("seed token: %v", err)
-	}
-
 	req := httptest.NewRequest(http.MethodGet, "/panel/api/ping", nil)
-	req.Header.Set("Authorization", "Bearer "+plaintext)
+	req.Header.Set("Authorization", "Bearer no-longer-supported")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if got := w.Body.String(); got != `{"api_authed":true}` {
-		t.Fatalf("body = %s, want api_authed true", got)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", w.Code, w.Body.String())
 	}
 }
 
-// TestCheckAPIAuth_AcceptsVerifiedClientCert asserts that a completed mTLS
-// handshake (a non-empty verified client chain) authenticates the request even
-// with no bearer token and no session — the equivalent of a valid token — and
-// sets api_authed so the CSRF middleware lets mutations through.
-func TestCheckAPIAuth_AcceptsVerifiedClientCert(t *testing.T) {
+func TestCheckAPIAuthRejectsClientCertificate(t *testing.T) {
 	engine, _ := newAPIAuthTestEngine(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/panel/api/ping", nil)
 	req.TLS = &tls.ConnectionState{
 		VerifiedChains: [][]*x509.Certificate{{&x509.Certificate{}}},
 	}
-	w := httptest.NewRecorder()
-	engine.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	if got := w.Body.String(); got != `{"api_authed":true}` {
-		t.Fatalf("body = %s, want api_authed true", got)
-	}
-}
-
-// TestCheckAPIAuth_EmptyVerifiedChainsFallsThrough asserts a TLS request with no
-// verified client chain is NOT treated as authenticated (it falls through to the
-// bearer/session paths) — so the cert branch can't accidentally authorize plain
-// browser HTTPS.
-func TestCheckAPIAuth_EmptyVerifiedChainsFallsThrough(t *testing.T) {
-	engine, _ := newAPIAuthTestEngine(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/panel/api/ping", nil)
-	req.TLS = &tls.ConnectionState{} // handshake done, but no client cert verified
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (unauthenticated, no verified chain)", w.Code)
+		t.Fatalf("status = %d, want 401; body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -199,5 +177,98 @@ func TestCheckAPIAuth_SessionLoginPasses(t *testing.T) {
 	pingResp.Body.Close()
 	if pingResp.StatusCode != http.StatusOK {
 		t.Fatalf("session ping status = %d, want 200", pingResp.StatusCode)
+	}
+}
+
+func TestCheckAPIAuthSessionMutationRequiresCSRF(t *testing.T) {
+	engine, _ := newAPIAuthTestEngine(t)
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	if resp, err := client.Get(ts.URL + "/test-login"); err != nil {
+		t.Fatalf("login: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/panel/api/mutate", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("mutation without token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("mutation without token status = %d, want 403", resp.StatusCode)
+	}
+
+	tokenResp, err := client.Get(ts.URL + "/csrf-token")
+	if err != nil {
+		t.Fatalf("get csrf token: %v", err)
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&body); err != nil {
+		tokenResp.Body.Close()
+		t.Fatalf("decode csrf token: %v", err)
+	}
+	tokenResp.Body.Close()
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/panel/api/mutate", nil)
+	req.Header.Set(session.CSRFHeaderName, body.Token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("mutation with token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("mutation with token status = %d, want 204", resp.StatusCode)
+	}
+}
+
+func TestRemovedAPIsAndPublicSubscriptionReturn404(t *testing.T) {
+	engine, _ := newAPIAuthTestEngine(t)
+	NewAPIController(engine.Group(""))
+
+	ts := httptest.NewServer(engine)
+	defer ts.Close()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+	loginResp, err := client.Get(ts.URL + "/test-login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginResp.Body.Close()
+
+	for _, target := range []string{
+		"/sub",
+		"/sub/client-id",
+		"/openapi.json",
+		"/panel/openapi.json",
+		"/panel/api-docs",
+		"/panel/api/nodes",
+		"/panel/api/groups",
+		"/panel/api/hosts",
+		"/panel/api/apiTokens",
+		"/panel/api/fail2ban",
+		"/panel/api/inbounds/allLinks",
+	} {
+		t.Run(target, func(t *testing.T) {
+			resp, err := client.Get(ts.URL + target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", resp.StatusCode)
+			}
+		})
 	}
 }

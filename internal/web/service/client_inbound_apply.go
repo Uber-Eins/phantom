@@ -13,7 +13,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/runtime"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"gorm.io/gorm"
@@ -27,18 +26,6 @@ func sameClientConfigExceptUpdatedAt(a, b map[string]any) bool {
 	an, aerr := json.Marshal(aa)
 	bn, berr := json.Marshal(bb)
 	return aerr == nil && berr == nil && string(an) == string(bn)
-}
-
-// advancePushedInbound advances the node's reconcile-skip fingerprint from the
-// pre-edit settings to the saved ones after every per-client push succeeded.
-func advancePushedInbound(rt runtime.Runtime, prevSettings string, ib *model.Inbound) {
-	rem, ok := rt.(*runtime.Remote)
-	if !ok {
-		return
-	}
-	prev := *ib
-	prev.Settings = prevSettings
-	rem.AdvancePushedInbound(&prev, ib)
 }
 
 // delInboundClients removes several clients from a single inbound in one pass:
@@ -112,7 +99,6 @@ func (s *ClientService) delInboundClients(inboundSvc *InboundService, inboundId 
 	if err != nil {
 		return false, err
 	}
-	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
 
 	var sharedSet map[string]bool
@@ -163,10 +149,6 @@ func (s *ClientService) delInboundClients(inboundSvc *InboundService, inboundId 
 			if t.emailShared || keepTraffic {
 				continue
 			}
-			if e := inboundSvc.DelClientIPs(tx, t.email); e != nil {
-				logger.Error("Error in delete client IPs")
-				return e
-			}
 			if len(t.email) > 0 {
 				if e := inboundSvc.DelClientStat(tx, t.email); e != nil {
 					logger.Error("Delete stats Data Error")
@@ -184,56 +166,27 @@ func (s *ClientService) delInboundClients(inboundSvc *InboundService, inboundId 
 		if err := s.SyncInbound(tx, inboundId, finalClients); err != nil {
 			return err
 		}
-		if oldInbound.NodeID != nil {
-			return (&NodeService{}).MarkNodeDirtyTx(tx, *oldInbound.NodeID)
-		}
 		return nil
 	}); txErr != nil {
 		return needRestart, txErr
 	}
 
-	// Resolve the node push plan once for the whole batch instead of per email.
-	var nodeRt runtime.Runtime
-	nodePush := false
-	if oldInbound.NodeID != nil {
-		rt, push, _, perr := inboundSvc.nodePushPlan(oldInbound)
-		if perr != nil {
-			return needRestart, perr
-		}
-		nodeRt, nodePush = rt, push
-		// Large batches collapse into one reconcile push rather than M deletes.
-		if nodePush && len(targets) > nodeBulkPushThreshold {
-			nodePush = false
-		}
-	}
-
 	// Apply runtime deletes after commit — outside the serialized writer so a
-	// slow node call can't stall traffic accounting.
-	nodePushFailed := false
+	// runtime call can't stall traffic accounting.
 	for _, t := range targets {
 		if len(t.email) == 0 {
 			continue
 		}
-		if oldInbound.NodeID == nil {
-			if t.needApiDel && t.notDepleted {
-				rt, rterr := inboundSvc.runtimeFor(oldInbound)
-				if rterr != nil {
+		if t.needApiDel && t.notDepleted {
+			rt, rterr := inboundSvc.runtimeFor(oldInbound)
+			if rterr != nil {
+				needRestart = true
+			} else if err1 := rt.RemoveUser(context.Background(), oldInbound, t.email); err1 != nil {
+				if !strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", t.email)) {
 					needRestart = true
-				} else if err1 := rt.RemoveUser(context.Background(), oldInbound, t.email); err1 != nil {
-					if !strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", t.email)) {
-						needRestart = true
-					}
 				}
 			}
-		} else if nodePush {
-			if err1 := nodeRt.DeleteUser(context.Background(), oldInbound, t.email); err1 != nil {
-				logger.Warning("Error in deleting client on", nodeRt.Name(), ":", err1)
-				nodePushFailed = true
-			}
 		}
-	}
-	if nodePush && !nodePushFailed {
-		advancePushedInbound(nodeRt, prevSettings, oldInbound)
 	}
 
 	return needRestart, nil
@@ -419,14 +372,13 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 		return false, err
 	}
 
-	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
 
 	needRestart := false
 
-	rt, push, _, perr := inboundSvc.nodePushPlan(oldInbound)
-	if perr != nil {
-		return false, perr
+	rt, runtimeErr := inboundSvc.runtimeFor(oldInbound)
+	if runtimeErr != nil {
+		needRestart = true
 	}
 
 	// Persist client stats + inbound atomically, serialized against the traffic
@@ -450,72 +402,49 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 		if err := s.SyncInbound(tx, oldInbound.Id, finalClients); err != nil {
 			return err
 		}
-		if oldInbound.NodeID != nil {
-			return (&NodeService{}).MarkNodeDirtyTx(tx, *oldInbound.NodeID)
-		}
 		return nil
 	}); txErr != nil {
 		return false, txErr
 	}
 
-	// Apply to the running runtime after commit — outside the serialized writer
-	// so a slow node call can't stall traffic accounting.
-	if oldInbound.NodeID == nil {
-		if !push {
-			needRestart = true
-		} else if oldInbound.Protocol == model.MTProto {
-			inboundSvc.applyLocalMtproto(oldInbound.Id)
-		} else {
-			for _, client := range clients {
-				if len(client.Email) == 0 {
-					needRestart = true
-					continue
-				}
-				if !client.Enable {
-					continue
-				}
-				cipher := ""
-				if oldInbound.Protocol == "shadowsocks" {
-					cipher = oldSettings["method"].(string)
-				}
-				err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
-					"email":        client.Email,
-					"id":           client.ID,
-					"auth":         client.Auth,
-					"security":     client.Security,
-					"flow":         client.Flow,
-					"password":     client.Password,
-					"cipher":       cipher,
-					"publicKey":    client.PublicKey,
-					"allowedIPs":   client.AllowedIPs,
-					"preSharedKey": client.PreSharedKey,
-					"keepAlive":    keepAliveStr(client.KeepAlive),
-				})
-				if err1 == nil {
-					logger.Debug("Client added on", rt.Name(), ":", client.Email)
-				} else {
-					logger.Debug("Error in adding client on", rt.Name(), ":", err1)
-					needRestart = true
-				}
-			}
-		}
+	// Apply to the running runtime after commit so database writes stay short.
+	if runtimeErr != nil {
+		return needRestart, nil
+	}
+	if oldInbound.Protocol == model.MTProto {
+		inboundSvc.applyLocalMtproto(oldInbound.Id)
 	} else {
-		// Large batches would be M sequential per-client RPCs; the inbound's saved
-		// settings already hold the final set, so mark dirty and let one reconcile
-		// push converge the node instead.
-		if push && len(clients) > nodeBulkPushThreshold {
-			push = false
-		}
 		for _, client := range clients {
-			if push {
-				if err1 := rt.AddClient(context.Background(), oldInbound, client); err1 != nil {
-					logger.Warning("Error in adding client on", rt.Name(), ":", err1)
-					push = false
-				}
+			if len(client.Email) == 0 {
+				needRestart = true
+				continue
 			}
-		}
-		if push {
-			advancePushedInbound(rt, prevSettings, oldInbound)
+			if !client.Enable {
+				continue
+			}
+			cipher := ""
+			if oldInbound.Protocol == "shadowsocks" {
+				cipher = oldSettings["method"].(string)
+			}
+			err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
+				"email":        client.Email,
+				"id":           client.ID,
+				"auth":         client.Auth,
+				"security":     client.Security,
+				"flow":         client.Flow,
+				"password":     client.Password,
+				"cipher":       cipher,
+				"publicKey":    client.PublicKey,
+				"allowedIPs":   client.AllowedIPs,
+				"preSharedKey": client.PreSharedKey,
+				"keepAlive":    keepAliveStr(client.KeepAlive),
+			})
+			if err1 == nil {
+				logger.Debug("Client added on", rt.Name(), ":", client.Email)
+			} else {
+				logger.Debug("Error in adding client on", rt.Name(), ":", err1)
+				needRestart = true
+			}
 		}
 	}
 
@@ -728,23 +657,11 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 		return false, nil
 	}
 
-	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
 
 	needRestart := false
 
-	// Resolve the push plan before the DB write so a node-state lookup failure
-	// still aborts the whole update without committing anything (it used to roll
-	// the transaction back). nodePushPlan only reads, so order doesn't matter.
-	var rt runtime.Runtime
-	var push bool
-	if len(oldEmail) > 0 {
-		var perr error
-		rt, push, _, perr = inboundSvc.nodePushPlan(oldInbound)
-		if perr != nil {
-			return false, perr
-		}
-	}
+	rt, rtErr := inboundSvc.runtimeFor(oldInbound)
 
 	// Persist client stats + inbound atomically, serialized against the traffic
 	// poll to avoid the cross-transaction lock-order deadlock (runSerializedTx).
@@ -762,9 +679,6 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 					if e := inboundSvc.UpdateClientStat(tx, oldEmail, &clients[0]); e != nil {
 						return e
 					}
-					if e := inboundSvc.UpdateClientIPs(tx, oldEmail, clients[0].Email); e != nil {
-						return e
-					}
 				} else {
 					stillUsed, sErr := inboundSvc.emailUsedByOtherInbounds(oldEmail, data.Id)
 					if sErr != nil {
@@ -772,9 +686,6 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 					}
 					if !stillUsed {
 						if e := inboundSvc.DelClientStat(tx, oldEmail); e != nil {
-							return e
-						}
-						if e := inboundSvc.DelClientIPs(tx, oldEmail); e != nil {
 							return e
 						}
 					}
@@ -794,9 +705,6 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 			}
 			if !stillUsed {
 				if e := inboundSvc.DelClientStat(tx, oldEmail); e != nil {
-					return e
-				}
-				if e := inboundSvc.DelClientIPs(tx, oldEmail); e != nil {
 					return e
 				}
 			}
@@ -827,65 +735,54 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 		if err := s.SyncInbound(tx, oldInbound.Id, finalClients); err != nil {
 			return err
 		}
-		if oldInbound.NodeID != nil {
-			return (&NodeService{}).MarkNodeDirtyTx(tx, *oldInbound.NodeID)
-		}
 		return nil
 	}); txErr != nil {
 		return false, txErr
 	}
 
 	// Apply to the running runtime after the DB is committed — outside the
-	// serialized writer so a slow node call can't stall traffic accounting.
+	// serialized writer so a runtime call can't stall traffic accounting.
 	if len(oldEmail) > 0 {
-		if oldInbound.NodeID == nil {
-			if !push {
-				needRestart = true
-			} else if oldInbound.Protocol == model.MTProto {
-				inboundSvc.applyLocalMtproto(oldInbound.Id)
-			} else {
-				if oldClients[clientIndex].Enable {
-					err1 := rt.RemoveUser(context.Background(), oldInbound, oldEmail)
-					if err1 == nil {
-						logger.Debug("Old client deleted on", rt.Name(), ":", oldEmail)
-					} else if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", oldEmail)) {
-						logger.Debug("User is already deleted. Nothing to do more...")
-					} else {
-						logger.Debug("Error in deleting client on", rt.Name(), ":", err1)
-						needRestart = true
-					}
-				}
-				if clients[0].Enable {
-					cipher := ""
-					if oldInbound.Protocol == "shadowsocks" {
-						cipher = oldSettings["method"].(string)
-					}
-					err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
-						"email":        clients[0].Email,
-						"id":           clients[0].ID,
-						"security":     clients[0].Security,
-						"flow":         clients[0].Flow,
-						"auth":         clients[0].Auth,
-						"password":     clients[0].Password,
-						"cipher":       cipher,
-						"publicKey":    clients[0].PublicKey,
-						"allowedIPs":   clients[0].AllowedIPs,
-						"preSharedKey": clients[0].PreSharedKey,
-						"keepAlive":    keepAliveStr(clients[0].KeepAlive),
-					})
-					if err1 == nil {
-						logger.Debug("Client edited on", rt.Name(), ":", clients[0].Email)
-					} else {
-						logger.Debug("Error in adding client on", rt.Name(), ":", err1)
-						needRestart = true
-					}
+		if rtErr != nil {
+			needRestart = true
+		} else if oldInbound.Protocol == model.MTProto {
+			inboundSvc.applyLocalMtproto(oldInbound.Id)
+		} else {
+			if oldClients[clientIndex].Enable {
+				err1 := rt.RemoveUser(context.Background(), oldInbound, oldEmail)
+				if err1 == nil {
+					logger.Debug("Old client deleted on", rt.Name(), ":", oldEmail)
+				} else if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", oldEmail)) {
+					logger.Debug("User is already deleted. Nothing to do more...")
+				} else {
+					logger.Debug("Error in deleting client on", rt.Name(), ":", err1)
+					needRestart = true
 				}
 			}
-		} else if push {
-			if err1 := rt.UpdateUser(context.Background(), oldInbound, oldEmail, clients[0]); err1 != nil {
-				logger.Warning("Error in updating client on", rt.Name(), ":", err1)
-			} else {
-				advancePushedInbound(rt, prevSettings, oldInbound)
+			if clients[0].Enable {
+				cipher := ""
+				if oldInbound.Protocol == "shadowsocks" {
+					cipher = oldSettings["method"].(string)
+				}
+				err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
+					"email":        clients[0].Email,
+					"id":           clients[0].ID,
+					"security":     clients[0].Security,
+					"flow":         clients[0].Flow,
+					"auth":         clients[0].Auth,
+					"password":     clients[0].Password,
+					"cipher":       cipher,
+					"publicKey":    clients[0].PublicKey,
+					"allowedIPs":   clients[0].AllowedIPs,
+					"preSharedKey": clients[0].PreSharedKey,
+					"keepAlive":    keepAliveStr(clients[0].KeepAlive),
+				})
+				if err1 == nil {
+					logger.Debug("Client edited on", rt.Name(), ":", clients[0].Email)
+				} else {
+					logger.Debug("Error in adding client on", rt.Name(), ":", err1)
+					needRestart = true
+				}
 			}
 		}
 	} else {
@@ -896,7 +793,7 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 	return needRestart, nil
 }
 
-func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inboundId int, email string, keepTraffic bool, fullDelete bool) (bool, error) {
+func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inboundId int, email string, keepTraffic bool, _ bool) (bool, error) {
 	defer lockInbound(inboundId).Unlock()
 
 	oldInbound, err := inboundSvc.GetInbound(inboundId)
@@ -946,7 +843,6 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 		return false, err
 	}
 
-	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
 
 	emailShared, err := inboundSvc.emailUsedByOtherInbounds(email, inboundId)
@@ -956,8 +852,7 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 
 	needRestart := false
 
-	// Decide what to delete and the push plan before the serialized DB write —
-	// these are reads, and nodePushPlan failing should abort before committing.
+	// Decide what to delete before the serialized DB write.
 	delStat := false
 	if len(email) > 0 && !emailShared && !keepTraffic {
 		traffic, tErr := inboundSvc.GetClientTrafficByEmail(email)
@@ -967,28 +862,16 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 		delStat = traffic != nil
 	}
 
-	// The runtime user is scoped to this inbound's tag + email, so the push plan
-	// is resolved independently of emailShared — a sibling inbound still carrying
-	// the email must not suppress removing the user from this inbound's Xray.
-	var rt runtime.Runtime
-	var push bool
-	if len(email) > 0 && (oldInbound.NodeID != nil || needApiDel) {
-		r, p, _, perr := inboundSvc.nodePushPlan(oldInbound)
-		if perr != nil {
-			return false, perr
-		}
-		rt, push = r, p
+	// The runtime user is scoped to this inbound's tag + email. A sibling
+	// inbound carrying the same email does not suppress the Xray removal.
+	rt, rtErr := inboundSvc.runtimeFor(oldInbound)
+	if rtErr != nil && needApiDel {
+		needRestart = true
 	}
 
 	// Persist the deletion atomically, serialized against the traffic poll to
 	// avoid the cross-transaction lock-order deadlock (runSerializedTx).
 	if txErr := runSerializedTx(func(tx *gorm.DB) error {
-		if !emailShared && !keepTraffic {
-			if e := inboundSvc.DelClientIPs(tx, email); e != nil {
-				logger.Error("Error in delete client IPs")
-				return e
-			}
-		}
 		if delStat {
 			if e := inboundSvc.DelClientStat(tx, email); e != nil {
 				logger.Error("Delete stats Data Error")
@@ -1005,116 +888,32 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 		if err := s.SyncInbound(tx, inboundId, finalClients); err != nil {
 			return err
 		}
-		if oldInbound.NodeID != nil {
-			return (&NodeService{}).MarkNodeDirtyTx(tx, *oldInbound.NodeID)
-		}
 		return nil
 	}); txErr != nil {
 		return false, txErr
 	}
 
-	// Apply the runtime delete after commit — outside the serialized writer so a
-	// slow node call can't stall traffic accounting. Independent of emailShared:
+	// Apply the runtime delete after commit so database writes stay short.
+	// Independent of emailShared:
 	// Xray users are keyed by inbound tag, so the user must be removed from this
 	// inbound's runtime even when the same email survives in another inbound.
 	if len(email) > 0 {
-		if oldInbound.NodeID == nil {
-			if oldInbound.Protocol == model.MTProto {
-				// mtg serves the full secret set, so any client delete re-applies
-				// it (removing the last client stops the sidecar) regardless of the
-				// client's enable state.
-				inboundSvc.applyLocalMtproto(oldInbound.Id)
-			} else if needApiDel {
-				// Local inbound: a disabled client isn't in the running Xray, so only
-				// a live one (needApiDel) needs an API removal.
-				if !push {
-					needRestart = true
-				} else if err1 := rt.RemoveUser(context.Background(), oldInbound, email); err1 == nil {
-					logger.Debug("Client deleted on", rt.Name(), ":", email)
-					needRestart = false
-				} else if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", email)) {
-					logger.Debug("User is already deleted. Nothing to do more...")
-				} else {
-					logger.Debug("Error in deleting client on", rt.Name(), ":", email)
-					needRestart = true
-				}
-			}
-		} else {
-			// Node inbound: propagate the delete regardless of the enable flag —
-			// the node's own DB still carries a disabled client and would
-			// resurrect it on the next snapshot otherwise. A full client delete
-			// must remove the node's client record too, not just detach it from
-			// this inbound (#5797).
-			if push {
-				var err1 error
-				if fullDelete {
-					err1 = rt.DeleteClient(context.Background(), email)
-				} else {
-					err1 = rt.DeleteUser(context.Background(), oldInbound, email)
-				}
-				if err1 != nil {
-					logger.Warning("Error in deleting client on", rt.Name(), ":", err1)
-				} else {
-					advancePushedInbound(rt, prevSettings, oldInbound)
-				}
+		if oldInbound.Protocol == model.MTProto {
+			// mtg serves the full secret set, so any client delete re-applies it.
+			inboundSvc.applyLocalMtproto(oldInbound.Id)
+		} else if needApiDel && rtErr == nil {
+			if err1 := rt.RemoveUser(context.Background(), oldInbound, email); err1 == nil {
+				logger.Debug("Client deleted on", rt.Name(), ":", email)
+			} else if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", email)) {
+				logger.Debug("User is already deleted. Nothing to do more...")
+			} else {
+				logger.Debug("Error in deleting client on", rt.Name(), ":", err1)
+				needRestart = true
 			}
 		}
 	}
 
 	return needRestart, nil
-}
-
-func (s *ClientService) SetClientTelegramUserID(inboundSvc *InboundService, trafficId int, tgId int64) (bool, error) {
-	traffic, inbound, err := inboundSvc.GetClientInboundByTrafficID(trafficId)
-	if err != nil {
-		return false, err
-	}
-	if inbound == nil {
-		return false, common.NewError("Inbound Not Found For Traffic ID:", trafficId)
-	}
-
-	clientEmail := traffic.Email
-
-	oldClients, err := inboundSvc.GetClients(inbound)
-	if err != nil {
-		return false, err
-	}
-
-	found := false
-	for _, oldClient := range oldClients {
-		if oldClient.Email == clientEmail {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return false, common.NewError("Client Not Found For Email:", clientEmail)
-	}
-
-	var settings map[string]any
-	err = json.Unmarshal([]byte(inbound.Settings), &settings)
-	if err != nil {
-		return false, err
-	}
-	clients := settings["clients"].([]any)
-	var newClients []any
-	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
-		if c["email"] == clientEmail {
-			c["tgId"] = tgId
-			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
-		}
-	}
-	settings["clients"] = newClients
-	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	inbound.Settings = string(modifiedSettings)
-	needRestart, err := s.UpdateInboundClient(inboundSvc, inbound, clientEmail)
-	return needRestart, err
 }
 
 func (s *ClientService) CheckIsEnabledByEmail(inboundSvc *InboundService, clientEmail string) (bool, error) {
@@ -1254,12 +1053,6 @@ func (s *ClientService) applyClientFieldByEmail(inboundSvc *InboundService, clie
 		return needRestart, common.NewError("Client Not Found For Email:", clientEmail)
 	}
 	return needRestart, nil
-}
-
-func (s *ClientService) ResetClientIpLimitByEmail(inboundSvc *InboundService, clientEmail string, count int) (bool, error) {
-	return s.applyClientFieldByEmail(inboundSvc, clientEmail, func(c map[string]any) {
-		c["limitIp"] = count
-	})
 }
 
 func (s *ClientService) ResetClientExpiryTimeByEmail(inboundSvc *InboundService, clientEmail string, expiry_time int64) (bool, error) {

@@ -61,7 +61,7 @@ export const TlsClientSettingsSchema = z.object({
   pinnedPeerCertSha256: z.array(z.string()).default([]),
   // Panel-only client directive (v2rayN `vcn`): verify the server certificate
   // against this name instead of the SNI. Comma-separated names. Shipped in
-  // share links / subscriptions; the modern replacement for `allowInsecure`,
+  // generated connection links; the modern replacement for `allowInsecure`,
   // which xray-core removed after 2026-06-01.
   verifyPeerCertByName: z.string().default(''),
 });

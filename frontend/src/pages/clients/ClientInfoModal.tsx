@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Divider, Modal, Popover, Tag, Tooltip, message } from 'antd';
-import { CopyOutlined, DownloadOutlined, EyeOutlined, QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CopyOutlined, QrcodeOutlined } from '@ant-design/icons';
 
-import { ClipboardManager, FileManager, HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
+import { ClipboardManager, HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
-import { normalizeClientIps, type ClientIpInfo } from '@/lib/clients/ip-log';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import { isPostQuantumLink } from '@/lib/xray/inbound-link';
@@ -30,22 +29,11 @@ const INBOUND_PROTOCOL_COLORS: Record<string, string> = {
 
 const INBOUND_CHIP_LIMIT = 1;
 
-interface SubSettings {
-  enable: boolean;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  subClashURI: string;
-  subClashEnable: boolean;
-  publicHost?: string;
-}
-
 interface ClientInfoModalProps {
   open: boolean;
   client: ClientRecord | null;
   inboundsById: Record<number, InboundOption>;
   isOnline: boolean;
-  subSettings?: SubSettings;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -54,28 +42,11 @@ interface ApiMsg<T = unknown> {
   obj?: T;
 }
 
-const DEFAULT_SUB: SubSettings = {
-  enable: false,
-  subURI: '',
-  subJsonURI: '',
-  subJsonEnable: false,
-  subClashURI: '',
-  subClashEnable: false,
-  publicHost: '',
-};
-
-const SUBSCRIPTION_DOWNLOAD_NAMES = {
-  standard: 'subscription-standard.txt',
-  json: 'subscription-json.json',
-  clash: 'subscription-clash.yaml',
-} as const;
-
 export default function ClientInfoModal({
   open,
   client,
   inboundsById,
   isOnline,
-  subSettings = DEFAULT_SUB,
   onOpenChange,
 }: ClientInfoModalProps) {
   const { datepicker } = useDatepicker();
@@ -91,30 +62,23 @@ export default function ClientInfoModal({
   const dateLabel = (ts?: number) => (!ts || ts <= 0 ? '-' : IntlUtil.formatDate(ts, datepicker));
   const [messageApi, messageContextHolder] = message.useMessage();
   const [links, setLinks] = useState<string[]>([]);
-  const [clientIps, setClientIps] = useState<ClientIpInfo[]>([]);
-  const [ipsLoading, setIpsLoading] = useState(false);
-  const [ipsClearing, setIpsClearing] = useState(false);
-  const [ipsModalOpen, setIpsModalOpen] = useState(false);
-  const [downloadingFormat, setDownloadingFormat] = useState<keyof typeof SUBSCRIPTION_DOWNLOAD_NAMES | null>(null);
 
   useEffect(() => {
     if (!open) {
       setLinks([]);
-      setClientIps([]);
-      setIpsModalOpen(false);
       return;
     }
-    if (!client?.subId) return;
+    if (!client?.email) return;
     let cancelled = false;
     (async () => {
       const msg = await HttpUtil.get(
-        `/panel/api/clients/subLinks/${encodeURIComponent(client.subId!)}`,
+        `/panel/api/clients/links/${encodeURIComponent(client.email)}`,
       ) as ApiMsg<string[]>;
       if (cancelled) return;
       setLinks(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
     })();
     return () => { cancelled = true; };
-  }, [open, client?.subId]);
+  }, [open, client?.email]);
 
   const traffic = client?.traffic || null;
   const totalBytes = client?.totalGB || 0;
@@ -125,77 +89,16 @@ export default function ClientInfoModal({
     return r > 0 ? r : 0;
   }, [totalBytes, used]);
 
-  const subLink = useMemo(() => {
-    if (!client?.subId || !subSettings?.subURI) return '';
-    return subSettings.subURI + client.subId;
-  }, [client?.subId, subSettings?.subURI]);
-
-  const subJsonLink = useMemo(() => {
-    if (!client?.subId) return '';
-    if (!subSettings?.subJsonEnable || !subSettings?.subJsonURI) return '';
-    return subSettings.subJsonURI + client.subId;
-  }, [client?.subId, subSettings?.subJsonEnable, subSettings?.subJsonURI]);
-
-  const subClashLink = useMemo(() => {
-    if (!client?.subId) return '';
-    if (!subSettings?.subClashEnable || !subSettings?.subClashURI) return '';
-    return subSettings.subClashURI + client.subId;
-  }, [client?.subId, subSettings?.subClashEnable, subSettings?.subClashURI]);
-
-  const showSubscription = !!(subSettings?.enable && client?.subId);
   const wgInbound = useMemo(() => findWireguardInbound(client, inboundsById), [client, inboundsById]);
   const wgConfigText = useMemo(() => {
     if (!client || !wgInbound || !isWireguardClient(client)) return '';
-    return buildWireguardClientConfig(client, wgInbound, window.location.hostname, subSettings?.publicHost ?? '');
-  }, [client, wgInbound, subSettings?.publicHost]);
+    return buildWireguardClientConfig(client, wgInbound, window.location.hostname);
+  }, [client, wgInbound]);
 
   async function copyValue(text: string) {
     if (!text) return;
     const ok = await ClipboardManager.copyText(String(text));
     if (ok) messageApi.success(t('copied'));
-  }
-
-  async function downloadSubscription(url: string, format: keyof typeof SUBSCRIPTION_DOWNLOAD_NAMES) {
-    if (!url || downloadingFormat) return;
-    setDownloadingFormat(format);
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Subscription download failed');
-      const content = await response.text();
-      FileManager.downloadTextFile(content, SUBSCRIPTION_DOWNLOAD_NAMES[format]);
-    } catch (_) {
-      messageApi.error(t('somethingWentWrong'));
-    } finally {
-      setDownloadingFormat(null);
-    }
-  }
-
-  async function loadIps() {
-    if (!client?.email) return;
-    setIpsLoading(true);
-    try {
-      const msg = await HttpUtil.post(`/panel/api/clients/ips/${encodeURIComponent(client.email)}`) as ApiMsg<unknown[]>;
-      if (!msg?.success) { setClientIps([]); return; }
-      setClientIps(normalizeClientIps(msg.obj));
-    } finally {
-      setIpsLoading(false);
-    }
-  }
-
-  async function clearIps() {
-    if (!client?.email) return;
-    setIpsClearing(true);
-    try {
-      const msg = await HttpUtil.post(`/panel/api/clients/clearIps/${encodeURIComponent(client.email)}`) as ApiMsg;
-      if (msg?.success) setClientIps([]);
-    } finally {
-      setIpsClearing(false);
-    }
-  }
-
-  function openIpsModal() {
-    setIpsModalOpen(true);
-    if (clientIps.length === 0) void loadIps();
   }
 
   return (
@@ -311,18 +214,6 @@ export default function ClientInfoModal({
                   </td>
                 </tr>
                 <tr>
-                  <td>{t('pages.clients.ipLimit')}</td>
-                  <td>{!client.limitIp ? <Tag>∞</Tag> : <Tag>{client.limitIp}</Tag>}</td>
-                </tr>
-                <tr>
-                  <td>{t('pages.inbounds.IPLimitlog')}</td>
-                  <td>
-                    <Button size="small" icon={<EyeOutlined />} aria-label={t('pages.clients.ipLog')} loading={ipsLoading} onClick={openIpsModal}>
-                      {clientIps.length > 0 ? clientIps.length : ''}
-                    </Button>
-                  </td>
-                </tr>
-                <tr>
                   <td>{t('pages.inbounds.createdAt')}</td>
                   <td><Tag>{dateLabel(client.createdAt)}</Tag></td>
                 </tr>
@@ -330,12 +221,6 @@ export default function ClientInfoModal({
                   <td>{t('pages.inbounds.updatedAt')}</td>
                   <td><Tag>{dateLabel(client.updatedAt)}</Tag></td>
                 </tr>
-                {client.group && (
-                  <tr>
-                    <td>{t('pages.clients.group')}</td>
-                    <td><Tag color="geekblue">{client.group}</Tag></td>
-                  </tr>
-                )}
                 {client.comment && (
                   <tr>
                     <td>{t('pages.clients.comment')}</td>
@@ -387,108 +272,6 @@ export default function ClientInfoModal({
               </tbody>
             </table>
 
-            {showSubscription && subLink && (
-              <>
-                <Divider>{t('subscription.title')}</Divider>
-                <div className="link-row">
-                  <Tag color="green" className="link-row-tag">SUB</Tag>
-                  <a
-                    href={subLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link-row-title link-row-title-anchor"
-                    title={subLink}
-                  >
-                    {client.subId}
-                  </a>
-                  <div className="link-row-actions">
-                    <Tooltip title={t('copy')}>
-                      <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subLink)} />
-                    </Tooltip>
-                    <Tooltip title={t('download')}>
-                      <Button size="small" icon={<DownloadOutlined />} aria-label={t('download')} loading={downloadingFormat === 'standard'} disabled={downloadingFormat !== null} onClick={() => void downloadSubscription(subLink, 'standard')} />
-                    </Tooltip>
-                    <Popover
-                      trigger="click"
-                      placement="left"
-                      destroyOnHidden
-                      content={<QrPanel value={subLink} remark={`${client.email} — ${t('subscription.title')}`} size={220} />}
-                    >
-                      <Tooltip title={t('pages.clients.qrCode')}>
-                        <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                      </Tooltip>
-                    </Popover>
-                  </div>
-                </div>
-                {subJsonLink && (
-                  <div className="link-row">
-                    <Tag color="purple" className="link-row-tag">JSON</Tag>
-                    <a
-                      href={subJsonLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-row-title link-row-title-anchor"
-                      title={subJsonLink}
-                    >
-                      {client.subId}
-                    </a>
-                    <div className="link-row-actions">
-                      <Tooltip title={t('copy')}>
-                        <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subJsonLink)} />
-                      </Tooltip>
-                      <Tooltip title={t('download')}>
-                        <Button size="small" icon={<DownloadOutlined />} aria-label={t('download')} loading={downloadingFormat === 'json'} disabled={downloadingFormat !== null} onClick={() => void downloadSubscription(subJsonLink, 'json')} />
-                      </Tooltip>
-                      <Popover
-                        trigger="click"
-                        placement="left"
-                        destroyOnHidden
-                        content={<QrPanel value={subJsonLink} remark={`${client.email} — JSON`} size={220} />}
-                      >
-                        <Tooltip title={t('pages.clients.qrCode')}>
-                          <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                        </Tooltip>
-                      </Popover>
-                    </div>
-                  </div>
-                )}
-                {subClashLink && (
-                  <div className="link-row">
-                    <Tooltip title="Clash / Mihomo">
-                      <Tag color="gold" className="link-row-tag">CLASH</Tag>
-                    </Tooltip>
-                    <a
-                      href={subClashLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-row-title link-row-title-anchor"
-                      title={subClashLink}
-                    >
-                      {client.subId}
-                    </a>
-                    <div className="link-row-actions">
-                      <Tooltip title={t('copy')}>
-                        <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subClashLink)} />
-                      </Tooltip>
-                      <Tooltip title={t('download')}>
-                        <Button size="small" icon={<DownloadOutlined />} aria-label={t('download')} loading={downloadingFormat === 'clash'} disabled={downloadingFormat !== null} onClick={() => void downloadSubscription(subClashLink, 'clash')} />
-                      </Tooltip>
-                      <Popover
-                        trigger="click"
-                        placement="left"
-                        destroyOnHidden
-                        content={<QrPanel value={subClashLink} remark={`${client.email} — Clash / Mihomo`} size={220} />}
-                      >
-                        <Tooltip title={t('pages.clients.qrCode')}>
-                          <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                        </Tooltip>
-                      </Popover>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
             {links.length > 0 && (
               <>
                 <Divider>{t('pages.inbounds.copyLink')}</Divider>
@@ -539,50 +322,6 @@ export default function ClientInfoModal({
               </>
             )}
           </>
-        )}
-      </Modal>
-
-      <Modal
-        open={ipsModalOpen}
-        title={`${t('pages.inbounds.IPLimitlog')}${client?.email ? ` — ${client.email}` : ''}`}
-        width={440}
-        onCancel={() => setIpsModalOpen(false)}
-        footer={[
-          <Button key="refresh" icon={<ReloadOutlined />} loading={ipsLoading} onClick={loadIps}>
-            {t('refresh')}
-          </Button>,
-          <Button key="clear" danger loading={ipsClearing} disabled={clientIps.length === 0} onClick={clearIps}>
-            {t('pages.clients.clearAll')}
-          </Button>,
-          <Button key="close" type="primary" onClick={() => setIpsModalOpen(false)}>
-            {t('close')}
-          </Button>,
-        ]}
-      >
-        {clientIps.length > 0 ? (
-          <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-            {clientIps.map((entry, idx) => (
-              <Tag
-                key={idx}
-                color="blue"
-                style={{
-                  display: 'block',
-                  width: 'fit-content',
-                  maxWidth: '100%',
-                  marginBottom: 6,
-                  padding: '2px 8px',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                }}
-              >
-                {entry.ip}{entry.time ? ` (${entry.time})` : ''}
-                {entry.node ? (
-                  <span style={{ marginInlineStart: 6, opacity: 0.85, fontWeight: 600 }}>@ {entry.node}</span>
-                ) : null}
-              </Tag>
-            ))}
-          </div>
-        ) : (
-          <Tag>{t('tgbot.noIpRecord')}</Tag>
         )}
       </Modal>
     </>
