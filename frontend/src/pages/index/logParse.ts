@@ -1,7 +1,7 @@
 // Parser for the panel log viewer. Logs reach the UI in two shapes:
 //
-//  - App log (SysLog off): the in-memory buffer, formatted as
-//      "2006/01/02 15:04:05 LEVEL - message"
+//  - App log (SysLog off): the service-specific in-memory buffer, formatted as
+//      "2006/01/02 15:04:05 LEVEL [service] message"
 //  - SysLog (journalctl -o short): every entry is prefixed with
 //      "Mon DD HH:MM:SS host ident[pid]: " before the real message, and the
 //    message itself is one of several shapes depending on which subsystem
@@ -41,11 +41,11 @@ const SYSLOG_PREFIX = /^([A-Za-z]{3}\s+\d{1,2})\s+(\d{2}:\d{2}:\d{2})\s+\S+\s+\S
 const GO_LOG_DATE = /^\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\s+/;
 // telego's own line prefix: "[Mon Jan _2 15:04:05 MST 2006] LEVEL rest".
 const TELEGO = /^\[[^\]]+\]\s+([A-Z]+)\s+(.*)$/;
-// App-log format emitted by the in-memory buffer:
-// "2006/01/02 15:04:05 LEVEL - message". Only a line matching this exact shape
-// carries a structured timestamp/level; anything else (e.g. a plain notice such
-// as the Windows "Syslog is not supported" message) is kept whole as the body.
-const APP_LOG = /^(\d{4}\/\d{2}\/\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(\S+)\s+-\s+([\s\S]*)$/;
+const APP_LOG =
+  /^(\d{4}\/\d{2}\/\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(\S+)\s+\[([^\]]+)\]\s*([\s\S]*)$/;
+const LEGACY_APP_LOG =
+  /^(\d{4}\/\d{2}\/\d{2})\s+(\d{2}:\d{2}:\d{2})\s+(\S+)\s+-\s+([\s\S]*)$/;
+const SOURCE_LOG = /^(DEBUG|INFO|NOTICE|WARNING|ERROR)\s+\[([^\]]+)\]\s*([\s\S]*)$/;
 
 // splitLevelDash pulls a leading "LEVEL - " off a message, returning the level
 // and the remainder. Returns null when the message does not start with a level.
@@ -63,6 +63,7 @@ export function parseLogLine(line: string): ParsedLog {
   let date = '';
   let time = '';
   let levelText = '';
+  let source = '';
   let body: string;
 
   const sys = raw.match(SYSLOG_PREFIX);
@@ -71,8 +72,13 @@ export function parseLogLine(line: string): ParsedLog {
     time = sys[2];
     let message = sys[3];
 
+    const structured = message.match(SOURCE_LOG);
     const ld = splitLevelDash(message);
-    if (ld) {
+    if (structured) {
+      levelText = structured[1];
+      source = structured[2];
+      body = structured[3];
+    } else if (ld) {
       // go-logging: "LEVEL - message"
       levelText = ld.level;
       body = ld.rest;
@@ -91,29 +97,54 @@ export function parseLogLine(line: string): ParsedLog {
   } else {
     const app = raw.match(APP_LOG);
     if (app) {
-      // App-log format: "2006/01/02 15:04:05 LEVEL - body"
       date = app[1];
       time = app[2];
       levelText = app[3];
-      body = app[4];
+      source = app[4];
+      body = app[5];
     } else {
-      // Plain message with no timestamp/level — show it verbatim.
-      body = raw;
+      const legacyApp = raw.match(LEGACY_APP_LOG);
+      if (legacyApp) {
+        date = legacyApp[1];
+        time = legacyApp[2];
+        levelText = legacyApp[3];
+        body = legacyApp[4];
+      } else {
+        // Plain message with no timestamp/level — show it verbatim.
+        body = raw;
+      }
     }
   }
 
   const li = LEVELS.indexOf(levelText);
   const levelClass = li >= 0 ? LEVEL_CLASSES[li] : 'level-unknown';
 
-  let service = '';
-  if (body.startsWith('XRAY:')) {
-    service = 'XRAY:';
+  let service = serviceLabel(source);
+  if (!service && body.startsWith('XRAY:')) {
+    service = 'Xray Core:';
     body = body.slice('XRAY:'.length).trimStart();
-  } else if (body) {
+  } else if (!service && body.startsWith('nginx:')) {
+    service = 'Nginx:';
+    body = body.slice('nginx:'.length).trimStart();
+  } else if (!service && body) {
     service = 'X-UI:';
   }
 
   const stamp = [date, time].filter(Boolean).join(' ');
 
   return { date, time, stamp, levelText, levelClass, service, body };
+}
+
+function serviceLabel(source: string): string {
+  switch (source.toLowerCase()) {
+    case 'x-ui':
+      return 'X-UI:';
+    case 'xray-core':
+    case 'xray':
+      return 'Xray Core:';
+    case 'nginx':
+      return 'Nginx:';
+    default:
+      return source ? `${source}:` : '';
+  }
 }

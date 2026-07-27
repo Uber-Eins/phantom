@@ -120,6 +120,7 @@ func deleteRemoteInboundRelations(tx *gorm.DB, remoteIDs []int) error {
 	}{
 		{"client_inbounds", "inbound_id IN ?"},
 		{"client_traffics", "inbound_id IN ?"},
+		{"inbound_frontings", "inbound_id IN ?"},
 		{"inbound_fallbacks", "master_id IN ? OR child_id IN ?"},
 		{"hosts", "inbound_id IN ?"},
 	}

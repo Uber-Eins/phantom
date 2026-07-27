@@ -55,13 +55,11 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30
     && echo "cdf411fce977a1f48adb6a3b224e3e2bd7eccfcd4d6e2e30c6dc443f1a0e8e52  /out/bin/geoip.dat" | sha256sum -c - \
     && echo "27c8353b72f5cbde081976ebbfda9bec0dba893448b6b729b1b2b6ba7f74af5e  /out/bin/geosite.dat" | sha256sum -c -
 
-FROM scratch
+FROM docker.io/library/alpine:3.23.3
+RUN apk add --no-cache ca-certificates nginx nginx-mod-stream tzdata
 WORKDIR /app
 COPY --from=panel-builder /out/x-ui /app/x-ui
 COPY --from=runtime-assets /out/bin/ /app/bin/
-COPY --from=runtime-assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=runtime-assets /usr/share/zoneinfo/Asia/Singapore /usr/share/zoneinfo/Asia/Singapore
-COPY --from=runtime-assets /tmp /tmp
 ENV TZ=Asia/Singapore \
     XUI_BIN_FOLDER=/app/bin \
     XUI_DB_FOLDER=/etc/x-ui \

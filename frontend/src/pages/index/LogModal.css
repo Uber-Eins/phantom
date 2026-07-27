@@ -136,10 +136,6 @@
   word-break: break-word;
 }
 
-.log-body-text {
-  margin-left: 4px;
-}
-
 body.dark .log-container {
   --log-stamp: #6aa6ee;
   --log-debug: #6aa6ee;

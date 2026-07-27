@@ -44,6 +44,12 @@ export const InboundCoreSchema = z.object({
   }),
   streamSettings: StreamSettingsSchema.optional(),
   clientStats: z.string().optional(),
+  fronting: z.object({
+    inboundId: z.number().int(),
+    template: z.string(),
+    decoyMode: z.string(),
+    decoyValue: z.string().optional(),
+  }).optional(),
 });
 export type InboundCore = z.infer<typeof InboundCoreSchema>;
 

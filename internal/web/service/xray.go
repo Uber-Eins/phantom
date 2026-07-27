@@ -12,6 +12,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
@@ -137,6 +138,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		if inbound.Protocol == model.MTProto {
 			continue
 		}
+		if err := nginxfront.ApplyRuntimeProjection(inbound); err != nil {
+			return nil, err
+		}
 		settings := map[string]any{}
 		_ = json.Unmarshal([]byte(inbound.Settings), &settings)
 
@@ -223,7 +227,7 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 			}
 		}
 
-		if inboundCanHostFallbacks(inbound) {
+		if inbound.Fronting == nil && inboundCanHostFallbacks(inbound) {
 			fallbacks, fbErr := s.inboundService.fallbackService.BuildFallbacksJSON(nil, inbound.Id)
 			if fbErr != nil {
 				return nil, fbErr

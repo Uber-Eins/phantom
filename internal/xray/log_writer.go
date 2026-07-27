@@ -55,7 +55,7 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 
 	// Check if the message contains a crash
 	if crashRegex.MatchString(message) {
-		logger.Debug("Core crash detected:\n", message)
+		logger.SourceError(logger.SourceXray, "Core crash detected:\n", message)
 		lw.setLastLine(message)
 		err1 := writeCrashReport(m)
 		if err1 != nil {
@@ -76,25 +76,25 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 
 			if strings.Contains(msgBodyLower, "tls handshake error") ||
 				strings.Contains(msgBodyLower, "connection ends") {
-				logger.Debug("XRAY: " + msgBody)
+				logger.SourceDebug(logger.SourceXray, msgBody)
 				lw.setLastLine("")
 				continue
 			}
 
 			if strings.Contains(msgBodyLower, "failed") {
-				logger.Error("XRAY: " + msgBody)
+				logger.SourceError(logger.SourceXray, msgBody)
 			} else {
 				switch level {
 				case "Debug":
-					logger.Debug("XRAY: " + msgBody)
+					logger.SourceDebug(logger.SourceXray, msgBody)
 				case "Info":
-					logger.Info("XRAY: " + msgBody)
+					logger.SourceInfo(logger.SourceXray, msgBody)
 				case "Warning":
-					logger.Warning("XRAY: " + msgBody)
+					logger.SourceWarning(logger.SourceXray, msgBody)
 				case "Error":
-					logger.Error("XRAY: " + msgBody)
+					logger.SourceError(logger.SourceXray, msgBody)
 				default:
-					logger.Debug("XRAY: " + msg)
+					logger.SourceDebug(logger.SourceXray, msg)
 				}
 			}
 			lw.setLastLine("")
@@ -103,15 +103,15 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 
 			if strings.Contains(msgLower, "tls handshake error") ||
 				strings.Contains(msgLower, "connection ends") {
-				logger.Debug("XRAY: " + msg)
+				logger.SourceDebug(logger.SourceXray, msg)
 				lw.setLastLine(msg)
 				continue
 			}
 
 			if strings.Contains(msgLower, "failed") {
-				logger.Error("XRAY: " + msg)
+				logger.SourceError(logger.SourceXray, msg)
 			} else {
-				logger.Debug("XRAY: " + msg)
+				logger.SourceDebug(logger.SourceXray, msg)
 			}
 			lw.setLastLine(msg)
 		}

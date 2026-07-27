@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { act } from '@testing-library/react';
+import { act, waitFor } from '@testing-library/react';
 
 import InboundFormModal from '@/pages/inbounds/form/InboundFormModal';
 import {
@@ -53,5 +53,18 @@ describe('InboundFormModal', () => {
       expect(labelsByProto.shadowsocks).toContain('Encryption method');
     }
   }, 30000); // iterates every protocol, re-rendering a heavy modal each time — slow on CI runners
+
+  it('exposes the reused VLESS Enc fields in the guide', async () => {
+    renderModal();
+    chooseSelectOption('guided-template', 'VLESS-XHTTP-TLS');
+
+    await waitFor(() => {
+      expect(fieldLabels()).toEqual(expect.arrayContaining([
+        'Decryption',
+        'Encryption',
+        'Generate keys',
+      ]));
+    });
+  });
 
 });

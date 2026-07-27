@@ -7,7 +7,6 @@ import {
   ConfigProvider,
   Layout,
   message,
-  Modal,
   Result,
   Row,
   Space,
@@ -33,10 +32,9 @@ import {
   DesktopOutlined,
   DatabaseOutlined,
   ForkOutlined,
-  CopyOutlined,
 } from '@ant-design/icons';
 
-import { HttpUtil, SizeFormatter, TimeFormatter, ClipboardManager, FileManager } from '@/utils';
+import { HttpUtil, SizeFormatter, TimeFormatter } from '@/utils';
 import { formatPanelVersion } from '@/lib/panel-version';
 import { activateOnKey } from '@/utils/a11y';
 import { useTheme } from '@/hooks/useTheme';
@@ -47,8 +45,8 @@ import { LazyMount } from '@/components/utility';
 import { setMessageInstance } from '@/utils/messageBus';
 import StatusCard from './StatusCard';
 import XrayStatusCard from './XrayStatusCard';
-const JsonEditor = lazy(() => import('@/components/form/JsonEditor'));
 const LogModal = lazy(() => import('./LogModal'));
+const ConfigModal = lazy(() => import('./ConfigModal'));
 const BackupModal = lazy(() => import('./BackupModal'));
 const SystemHistoryModal = lazy(() => import('./SystemHistoryModal'));
 const XrayMetricsModal = lazy(() => import('./XrayMetricsModal'));
@@ -74,7 +72,6 @@ export default function IndexPage() {
   const [xrayLogsOpen, setXrayLogsOpen] = useState(false);
   const [versionOpen, setVersionOpen] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
-  const [configText, setConfigText] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingTip, setLoadingTip] = useState(t('loading'));
 
@@ -107,27 +104,6 @@ export default function IndexPage() {
     await HttpUtil.post('/panel/api/server/restartXrayService');
     await refresh();
   }, [refresh]);
-
-  async function openConfig() {
-    setLoading(true);
-    try {
-      const msg = await HttpUtil.get('/panel/api/server/getConfigJson');
-      if (!msg?.success) return;
-      setConfigText(JSON.stringify(msg.obj, null, 2));
-      setConfigTextOpen(true);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function copyConfig() {
-    const ok = await ClipboardManager.copyText(configText || '');
-    if (ok) messageApi.success('Copied');
-  }
-
-  function downloadConfig() {
-    FileManager.downloadTextFile(configText, 'config.json');
-  }
 
   const pageClass = `index-page ${isDark ? 'is-dark' : ''} ${isUltra ? 'is-ultra' : ''}`.trim();
 
@@ -182,7 +158,7 @@ export default function IndexPage() {
                           <BarsOutlined />
                           {!isMobile && <span>{t('pages.index.logs')}</span>}
                         </Space>,
-                        <Space className="action" key="config" role="button" tabIndex={0} aria-label={t('pages.index.config')} onClick={openConfig} onKeyDown={activateOnKey(openConfig)}>
+                        <Space className="action" key="config" role="button" tabIndex={0} aria-label={t('pages.index.config')} onClick={() => setConfigTextOpen(true)} onKeyDown={activateOnKey(() => setConfigTextOpen(true))}>
                           <ControlOutlined />
                           {!isMobile && <span>{t('pages.index.config')}</span>}
                         </Space>,
@@ -441,42 +417,10 @@ export default function IndexPage() {
         </LazyMount>
 
         <LazyMount when={configTextOpen}>
-          <Modal
+          <ConfigModal
             open={configTextOpen}
-            title={t('pages.index.config')}
-            width={isMobile ? '100%' : 900}
-            style={isMobile
-              ? { top: 20, maxWidth: 'calc(100vw - 16px)' }
-              : { top: 20 }}
-            onCancel={() => setConfigTextOpen(false)}
-            footer={[
-              <Button
-                key="download"
-                onClick={downloadConfig}
-                size={isMobile ? 'small' : 'middle'}
-                icon={<CloudDownloadOutlined />}
-              >
-                {isMobile ? 'Download' : 'config.json'}
-              </Button>,
-              <Button
-                key="copy"
-                type="primary"
-                onClick={copyConfig}
-                size={isMobile ? 'small' : 'middle'}
-                icon={<CopyOutlined />}
-              >
-                Copy
-              </Button>,
-            ]}
-          >
-            <JsonEditor
-              value={configText}
-              onChange={setConfigText}
-              minHeight={isMobile ? '300px' : 'calc(100vh - 220px)'}
-              maxHeight={isMobile ? '70vh' : 'calc(100vh - 220px)'}
-              readOnly
-            />
-          </Modal>
+            onClose={() => setConfigTextOpen(false)}
+          />
         </LazyMount>
       </Layout>
     </ConfigProvider>

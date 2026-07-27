@@ -1,13 +1,11 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Button, Collapse, Descriptions, Divider, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
-import { RadarChartOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Collapse, Divider, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 
 import { FormField } from '@/components/form/rhf';
 import { UTLS_FINGERPRINT } from '@/schemas/primitives';
-import { validateRealityTarget } from '@/lib/xray/stream-wire-normalize';
 import type { RealityScanResult } from '@/models/reality-scan';
-import RealityTargetScannerModal from './RealityTargetScannerModal';
+import RealityTargetFields from './RealityTargetFields';
 
 interface RealityFormProps {
   saving: boolean;
@@ -39,7 +37,6 @@ export default function RealityForm({
   clearMldsa65,
 }: RealityFormProps) {
   const { t } = useTranslation();
-  const [scannerOpen, setScannerOpen] = useState(false);
   return (
     <>
       <FormField
@@ -60,64 +57,13 @@ export default function RealityForm({
           options={Object.values(UTLS_FINGERPRINT).map((fp) => ({ value: fp, label: fp }))}
         />
       </FormField>
-      <Form.Item
-        label={t('pages.inbounds.form.target')}
-        tooltip={t('pages.inbounds.form.realityTargetHint')}
-      >
-        <Space.Compact block style={{ display: 'flex' }}>
-          <FormField
-            name={['streamSettings', 'realitySettings', 'target']}
-            noStyle
-            rules={{
-              validate: (value) => {
-                const errKey = validateRealityTarget(typeof value === 'string' ? value : '');
-                return errKey ? errKey : true;
-              },
-            }}
-          >
-            <Input style={{ flex: 1 }} placeholder="example.com:443" />
-          </FormField>
-          <Button icon={<RadarChartOutlined />} loading={scanning} onClick={scanRealityTarget}>
-            {t('pages.inbounds.form.scan')}
-          </Button>
-          <Button icon={<SearchOutlined />} onClick={() => setScannerOpen(true)}>
-            {t('pages.inbounds.form.findTargets')}
-          </Button>
-        </Space.Compact>
-      </Form.Item>
-      {scanResult && (
-        <Form.Item label=" " colon={false}>
-          <Alert
-            type={scanResult.feasible ? 'success' : 'warning'}
-            showIcon
-            title={
-              scanResult.feasible
-                ? t('pages.inbounds.form.scanFeasible')
-                : scanResult.reason || t('pages.inbounds.form.scanNotFeasible')
-            }
-            description={
-              <Descriptions size="small" column={1}>
-                <Descriptions.Item label="TLS">{scanResult.tlsVersion || '—'}</Descriptions.Item>
-                <Descriptions.Item label="ALPN">{scanResult.alpn || '—'}</Descriptions.Item>
-                <Descriptions.Item label={t('pages.inbounds.form.scanCurve')}>
-                  {scanResult.curveID || '—'}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('pages.inbounds.form.scanCert')}>
-                  {scanResult.certValid
-                    ? `${scanResult.certSubject} (${scanResult.certIssuer})`
-                    : t('pages.inbounds.form.scanCertInvalid')}
-                </Descriptions.Item>
-                <Descriptions.Item label={t('pages.inbounds.form.scanLatency')}>
-                  {scanResult.latencyMs > 0 ? `${scanResult.latencyMs} ms` : '—'}
-                </Descriptions.Item>
-              </Descriptions>
-            }
-          />
-        </Form.Item>
-      )}
-      <FormField label="SNI" name={['streamSettings', 'realitySettings', 'serverNames']}>
-        <Select mode="tags" tokenSeparators={[',']} style={{ width: '100%' }} />
-      </FormField>
+      <RealityTargetFields
+        scanning={scanning}
+        scanResult={scanResult}
+        scanRealityTarget={scanRealityTarget}
+        scanRealityCandidates={scanRealityCandidates}
+        applyRealityScanResult={applyRealityScanResult}
+      />
       <FormField
         name={['streamSettings', 'realitySettings', 'maxTimediff']}
         label={t('pages.inbounds.form.maxTimeDiff')}
@@ -248,12 +194,6 @@ export default function RealityForm({
             ),
           },
         ]}
-      />
-      <RealityTargetScannerModal
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        scanRealityCandidates={scanRealityCandidates}
-        onPick={applyRealityScanResult}
       />
     </>
   );

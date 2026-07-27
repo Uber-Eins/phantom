@@ -35,8 +35,6 @@ import (
 
 // runWebServer initializes and starts the web server for the 3x-ui panel.
 func runWebServer() {
-	log.Printf("Starting %v %v", config.GetName(), config.GetPanelVersion())
-
 	switch config.GetLogLevel() {
 	case config.Debug:
 		logger.InitLogger(logging.DEBUG)
@@ -51,6 +49,7 @@ func runWebServer() {
 	default:
 		log.Fatalf("Unknown log level: %v", config.GetLogLevel())
 	}
+	logger.Infof("Starting %s %s", config.GetName(), config.GetPanelVersion())
 
 	for _, line := range sys.ApplyMemoryTuning() {
 		logger.Info(line)

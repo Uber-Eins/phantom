@@ -30,6 +30,15 @@ systemctl --user restart phantom.service
 Host 网络意味着不需要也不应配置 `PublishPort`。低位端口由宿主机的
 `net.ipv4.ip_unprivileged_port_start` 控制。
 
+入站配置向导可以让 Nginx 在 TCP/443 上显示容器内的本地站点。
+`/etc/x-ui` 以外的站点目录需要在 Quadlet 的 `[Container]` 中额外声明只读挂载，例如：
+
+```ini
+Volume=/srv/example-site:/srv/example-site:ro,Z
+```
+
+保存本地站点配置前，向导会检查容器内的绝对路径是否存在且可读。
+
 ## 登录后继续运行
 
 ```sh

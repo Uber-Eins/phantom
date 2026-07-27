@@ -7,6 +7,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 )
 
@@ -160,6 +161,23 @@ func reservedAPIPort() int {
 
 func (s *InboundService) checkPortConflict(inbound *model.Inbound, ignoreId int) (*portConflictDetail, error) {
 	newBits := inboundTransports(inbound.Protocol, inbound.StreamSettings, inbound.Settings)
+
+	if inbound.Port == nginxfront.PublicPort &&
+		newBits&transportTCP != 0 &&
+		!nginxfront.IsManagedSocket(inbound.Listen) {
+		claimed, err := nginxfront.PublicPortClaimed()
+		if err != nil {
+			return nil, err
+		}
+		if claimed {
+			return &portConflictDetail{
+				Tag:        "nginx-fronting",
+				Listen:     "*",
+				Port:       nginxfront.PublicPort,
+				Transports: transportTCP,
+			}, nil
+		}
+	}
 
 	// The internal Xray API inbound (tag "api", loopback TCP) isn't a DB row,
 	// so a local user inbound reusing its port would leave Xray binding the

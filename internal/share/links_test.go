@@ -162,6 +162,33 @@ func TestVmessLinkUsesRequestHost(t *testing.T) {
 	}
 }
 
+func TestGuidedInboundLinkUsesNginxPublicPort(t *testing.T) {
+	inbound := &model.Inbound{
+		Port:           0,
+		Listen:         "/run/xray/VLESS-TCP-REALITY",
+		Protocol:       model.VLESS,
+		Remark:         "guided",
+		Settings:       `{"clients":[{"id":"` + testClientID + `","email":"alice"}],"decryption":"none","encryption":"none"}`,
+		StreamSettings: `{"network":"tcp","security":"reality","tcpSettings":{"header":{"type":"none"}},"realitySettings":{"serverNames":["example.com"],"settings":{"publicKey":"public"}}}`,
+		Fronting: &model.InboundFronting{
+			Template:  "vless-tcp-reality",
+			DecoyMode: "reality-target",
+		},
+	}
+
+	links := NewLinkProvider().LinksForClient("panel.example.test", inbound, "alice")
+	if len(links) != 1 {
+		t.Fatalf("guided links = %#v", links)
+	}
+	parsed := parseLink(t, links[0])
+	if parsed.Hostname() != "panel.example.test" || parsed.Port() != "443" {
+		t.Fatalf("guided endpoint = %s", parsed.Host)
+	}
+	if inbound.Port != 0 {
+		t.Fatalf("link projection mutated stored port to %d", inbound.Port)
+	}
+}
+
 func TestMtprotoLinkUsesClientSecret(t *testing.T) {
 	const secret = "ee8196fe6ed8b637d001f91d6952cfcdf07777772e636c6f7564666c6172652e636f6d"
 	client := model.Client{Email: "alice", Secret: secret}

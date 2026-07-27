@@ -15,6 +15,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	wgutil "github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
@@ -39,6 +40,7 @@ func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
 	}
 	s.enrichClientStats(db, inbounds)
 	s.annotateFallbackParents(db, inbounds)
+	nginxfront.Annotate(db, inbounds)
 	return inbounds, nil
 }
 
@@ -59,6 +61,7 @@ func (s *InboundService) GetInboundsSlim(userId int) ([]*model.Inbound, error) {
 		return nil, err
 	}
 	s.annotateFallbackParents(db, inbounds)
+	nginxfront.Annotate(db, inbounds)
 	// Top up stats rows owned by sibling inbounds (multi-attached clients)
 	// so the list's depleted/expiring badges see every client; the UUID/SubId
 	// enrichment stays skipped. Must run before slimming strips the settings.
@@ -252,6 +255,7 @@ func (s *InboundService) GetAllInbounds() ([]*model.Inbound, error) {
 		return nil, err
 	}
 	s.enrichClientStats(db, inbounds)
+	nginxfront.Annotate(db, inbounds)
 	return inbounds, nil
 }
 
@@ -730,7 +734,10 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 	var postCommitApply func()
 	var ib model.Inbound
 	loadErr := db.Model(model.Inbound{}).Where("id = ?", id).First(&ib).Error
+	var fronting *model.InboundFronting
 	if loadErr == nil {
+		fronting, _ = nginxfront.Get(id)
+		ib.Fronting = fronting
 		if ib.Enable {
 			rt, available := localRuntime()
 			if !available {
@@ -756,6 +763,9 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 		if err := s.clientService.DetachInbound(tx, id); err != nil {
 			return err
 		}
+		if err := tx.Where("inbound_id = ?", id).Delete(&model.InboundFronting{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Delete(model.Inbound{}, id).Error; err != nil {
 			return err
 		}
@@ -765,6 +775,12 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 	}
 	if postCommitApply != nil {
 		postCommitApply()
+	}
+	if fronting != nil {
+		if err := nginxfront.Reconcile(); err != nil {
+			return needRestart, err
+		}
+		nginxfront.RemoveInboundAssets(id, ib.Listen)
 	}
 	if loadErr == nil && ib.Tag != "" {
 		if routingChanged, syncErr := (&XraySettingService{}).RemoveInboundTagReferences(ib.Tag); syncErr != nil {
@@ -827,6 +843,7 @@ func (s *InboundService) GetInbound(id int) (*model.Inbound, error) {
 	if err != nil {
 		return nil, err
 	}
+	nginxfront.Annotate(db, []*model.Inbound{inbound})
 	return inbound, nil
 }
 
@@ -838,6 +855,7 @@ func (s *InboundService) GetInboundDetail(id int) (*model.Inbound, error) {
 		return nil, err
 	}
 	s.enrichClientStats(db, []*model.Inbound{inbound})
+	nginxfront.Annotate(db, []*model.Inbound{inbound})
 	return inbound, nil
 }
 
@@ -856,6 +874,15 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 		return false, err
 	}
 	inbound.Enable = enable
+	if inbound.Fronting != nil {
+		if err := nginxfront.Reconcile(); err != nil {
+			_ = db.Model(model.Inbound{}).Where("id = ?", id).
+				Update("enable", !enable).Error
+			inbound.Enable = !enable
+			_ = nginxfront.Reconcile()
+			return false, err
+		}
+	}
 
 	needRestart := false
 	if mtprotoRoutesThroughXray(inbound) {
@@ -902,6 +929,14 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	oldInbound, err := s.GetInbound(inbound.Id)
 	if err != nil {
 		return inbound, false, err
+	}
+	if oldInbound.Fronting != nil {
+		inbound.Fronting = oldInbound.Fronting
+		if err := nginxfront.ValidateCandidate(inbound, oldInbound.Fronting, inbound.Id); err != nil {
+			return inbound, false, err
+		}
+	} else {
+		inbound.Fronting = nil
 	}
 	conflict, err := s.checkPortConflict(inbound, inbound.Id)
 	if err != nil {
@@ -1110,6 +1145,11 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	if postCommitApply != nil {
 		postCommitApply()
 	}
+	if oldInbound.Fronting != nil {
+		if err := nginxfront.Reconcile(); err != nil {
+			return inbound, needRestart, err
+		}
+	}
 	// After the rename is committed, point any routing rules / loopback outbounds
 	// in xrayTemplateConfig at the new tag (oldInbound.Tag now holds the resolved
 	// new tag; tag holds the pre-edit one). Done post-commit so a sync failure
@@ -1130,8 +1170,18 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 	}
 
 	runtimeInbound := *inbound
+	if runtimeInbound.Fronting == nil {
+		fronting, err := nginxfront.Get(inbound.Id)
+		if err != nil {
+			return nil, err
+		}
+		runtimeInbound.Fronting = fronting
+	}
+	if err := nginxfront.ApplyRuntimeProjection(&runtimeInbound); err != nil {
+		return nil, err
+	}
 	settings := map[string]any{}
-	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+	if err := json.Unmarshal([]byte(runtimeInbound.Settings), &settings); err != nil {
 		return nil, err
 	}
 
@@ -1174,7 +1224,7 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 		mutated = true
 	}
 
-	if inboundCanHostFallbacks(inbound) {
+	if runtimeInbound.Fronting == nil && inboundCanHostFallbacks(&runtimeInbound) {
 		fallbacks, fbErr := s.fallbackService.BuildFallbacksJSON(tx, inbound.Id)
 		if fbErr != nil {
 			return nil, fbErr

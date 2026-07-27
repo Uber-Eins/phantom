@@ -23,7 +23,7 @@ describe('parseLogLine — SysLog (journalctl) formats', () => {
     );
     expect(r.stamp).toBe('Jun 08 23:56:52');
     expect(r.levelText).toBe('WARNING');
-    expect(r.service).toBe('XRAY:');
+    expect(r.service).toBe('Xray Core:');
     expect(r.body).toBe('core: Xray 26.6.1 started');
   });
 
@@ -76,5 +76,25 @@ describe('parseLogLine — app-log format (SysLog off)', () => {
     const r = parseLogLine('');
     expect(r.stamp).toBe('');
     expect(r.body).toBe('');
+  });
+
+  it('parses the service-tagged app format', () => {
+    const r = parseLogLine(
+      '2026/07/27 15:17:01 WARNING [xray-core] core: Xray 26.7.11 started',
+    );
+    expect(r.stamp).toBe('2026/07/27 15:17:01');
+    expect(r.levelText).toBe('WARNING');
+    expect(r.service).toBe('Xray Core:');
+    expect(r.body).toBe('core: Xray 26.7.11 started');
+  });
+
+  it('parses a service-tagged syslog message', () => {
+    const r = parseLogLine(
+      'Jul 27 15:13:42 host phantom[68]: NOTICE [nginx] using the "epoll" event method',
+    );
+    expect(r.stamp).toBe('Jul 27 15:13:42');
+    expect(r.levelText).toBe('NOTICE');
+    expect(r.service).toBe('Nginx:');
+    expect(r.body).toBe('using the "epoll" event method');
   });
 });

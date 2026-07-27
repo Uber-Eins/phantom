@@ -27,6 +27,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
@@ -667,21 +668,28 @@ func (s *ServerService) StopXrayService() error {
 		logger.Error("stop xray failed:", err)
 		return err
 	}
-	return nil
-}
-
-func (s *ServerService) RestartXrayService() error {
-	err := s.xrayService.RestartXray(true)
-	if err != nil {
-		logger.Error("start xray failed:", err)
+	if err := nginxfront.Stop(); err != nil {
+		logger.Error("stop nginx fronting failed:", err)
 		return err
 	}
 	return nil
 }
 
-func (s *ServerService) GetLogs(count string, level string) []string {
+func (s *ServerService) RestartXrayService() error {
+	if err := nginxfront.PrepareRuntimeDir(); err != nil {
+		return err
+	}
+	err := s.xrayService.RestartXray(true)
+	if err != nil {
+		logger.Error("start xray failed:", err)
+		return err
+	}
+	return nginxfront.Reconcile()
+}
+
+func (s *ServerService) GetLogs(count string, level string, source string) []string {
 	c, _ := strconv.Atoi(count)
-	return logger.GetLogs(c, level)
+	return logger.GetSourceLogs(c, level, source)
 }
 
 // parseAccessLogFields extracts the structured fields from one Xray access-log
@@ -849,6 +857,10 @@ func (s *ServerService) GetConfigJson() (any, error) {
 	}
 
 	return jsonData, nil
+}
+
+func (s *ServerService) GetNginxConfig() (string, error) {
+	return nginxfront.ReadConfig()
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {

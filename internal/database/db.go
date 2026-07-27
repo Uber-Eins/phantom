@@ -44,6 +44,7 @@ func allModels() []any {
 		&model.ClientRecord{},
 		&model.ClientInbound{},
 		&model.InboundFallback{},
+		&model.InboundFronting{},
 		&model.OutboundSubscription{},
 	}
 }
@@ -66,6 +67,9 @@ func initModels() error {
 	if err := pruneOrphanedClientInbounds(); err != nil {
 		return err
 	}
+	if err := pruneOrphanedInboundFrontings(); err != nil {
+		return err
+	}
 	if err := repairOverflowedTrafficCounters(); err != nil {
 		return err
 	}
@@ -82,6 +86,13 @@ func initModels() error {
 		return err
 	}
 	return nil
+}
+
+func pruneOrphanedInboundFrontings() error {
+	return db.Exec(`
+		DELETE FROM inbound_frontings
+		WHERE inbound_id NOT IN (SELECT id FROM inbounds)
+	`).Error
 }
 
 type sqliteIndexListRow struct {

@@ -67,6 +67,7 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.GET("/:id/fallbacks", a.getFallbacks)
 
 	g.POST("/add", a.addInbound)
+	g.POST("/add-guided", a.addGuidedInbound)
 	g.POST("/del/:id", a.delInbound)
 	g.POST("/bulkDel", a.bulkDelInbounds)
 	g.POST("/update/:id", a.updateInbound)
@@ -137,8 +138,39 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	}
 	user := session.GetLoginUser(c)
 	inbound.UserId = user.Id
+	inbound.Fronting = nil
 
 	inbound, needRestart, err := a.inboundService.AddInbound(inbound)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundCreateSuccess"), inbound, nil)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
+	a.broadcastInboundsUpdate(user.Id)
+	notifyClientsChanged()
+}
+
+type addGuidedInboundRequest struct {
+	Inbound  model.Inbound         `json:"inbound" binding:"required"`
+	Fronting model.InboundFronting `json:"fronting" binding:"required"`
+}
+
+func (a *InboundController) addGuidedInbound(c *gin.Context) {
+	request, ok := middleware.BindJSONAndValidate[addGuidedInboundRequest](c)
+	if !ok {
+		return
+	}
+	user := session.GetLoginUser(c)
+	request.Inbound.UserId = user.Id
+	request.Inbound.Fronting = nil
+
+	inbound, needRestart, err := a.inboundService.AddGuidedInbound(
+		&request.Inbound,
+		&request.Fronting,
+	)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return

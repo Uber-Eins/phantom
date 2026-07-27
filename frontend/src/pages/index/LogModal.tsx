@@ -14,32 +14,37 @@ interface LogModalProps {
   onClose: () => void;
 }
 
+type LogSource = 'x-ui' | 'xray-core' | 'nginx';
+
 const AUTO_UPDATE_INTERVAL = 5000;
 
 export default function LogModal({ open, onClose }: LogModalProps) {
   const { t } = useTranslation();
   const { isMobile } = useMediaQuery();
+  const [source, setSource] = useState<LogSource>('x-ui');
   const [rows, setRows] = useState('20');
   const [level, setLevel] = useState('info');
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const openRef = useRef(open);
+  const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
     try {
       const msg = await HttpUtil.post<string[]>(`/panel/api/server/logs/${rows}`, {
         level,
+        source,
       });
-      if (msg?.success) {
+      if (request === requestRef.current && msg?.success) {
         setLogs(msg.obj || []);
       }
       await PromiseUtil.sleep(300);
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
-  }, [rows, level]);
+  }, [rows, level, source]);
 
   const refreshRef = useRef(refresh);
   useEffect(() => {
@@ -47,13 +52,8 @@ export default function LogModal({ open, onClose }: LogModalProps) {
   }, [refresh]);
 
   useEffect(() => {
-    openRef.current = open;
     if (open) refresh();
   }, [open, refresh]);
-
-  useEffect(() => {
-    if (openRef.current) refresh();
-  }, [rows, level, refresh]);
 
   useEffect(() => {
     if (!open || !autoUpdate) return;
@@ -64,7 +64,7 @@ export default function LogModal({ open, onClose }: LogModalProps) {
   const parsedLogs = useMemo(() => logs.map(parseLogLine), [logs]);
 
   function download() {
-    FileManager.downloadTextFile(logs.join('\n'), 'x-ui.log');
+    FileManager.downloadTextFile(logs.join('\n'), `${source}.log`);
   }
 
   const titleNode = (
@@ -85,6 +85,20 @@ export default function LogModal({ open, onClose }: LogModalProps) {
       title={titleNode}
     >
       <Form layout="inline" className="log-toolbar">
+        <Form.Item>
+          <Select<LogSource>
+            value={source}
+            size="small"
+            style={{ width: 125 }}
+            onChange={setSource}
+            aria-label={t('pages.index.logs')}
+            options={[
+              { value: 'x-ui', label: 'X-UI' },
+              { value: 'xray-core', label: 'Xray Core' },
+              { value: 'nginx', label: 'Nginx' },
+            ]}
+          />
+        </Form.Item>
         <Form.Item>
           <Space.Compact>
             <Select
@@ -143,11 +157,9 @@ export default function LogModal({ open, onClose }: LogModalProps) {
                   <span className={`log-level-badge ${log.levelClass}`}>{log.levelText}</span>
                 )}
               </div>
-              {(log.body || log.service) && (
+              {log.body && (
                 <div className="log-body">
-                  {log.service && <b>{log.service}</b>}
-                  {log.service && log.body ? ' ' : ''}
-                  {log.body && <span className="log-body-text">{log.body}</span>}
+                  <span>{log.body}</span>
                 </div>
               )}
             </div>
@@ -158,11 +170,9 @@ export default function LogModal({ open, onClose }: LogModalProps) {
               {log.stamp && <span className="log-stamp">{log.stamp}</span>}
               {log.stamp && log.levelText ? ' ' : ''}
               {log.levelText && <span className={`log-level ${log.levelClass}`}>{log.levelText}</span>}
-              {(log.body || log.service) && (
+              {log.body && (
                 <>
                   {(log.stamp || log.levelText) && <span> - </span>}
-                  {log.service && <b>{log.service}</b>}
-                  {log.service && log.body ? ' ' : ''}
                   <span>{log.body}</span>
                 </>
               )}

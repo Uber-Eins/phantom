@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 )
 
 type LinkProvider struct{}
@@ -20,7 +21,13 @@ func (p *LinkProvider) build(host string) *LinkService {
 
 func (p *LinkProvider) LinksForClient(host string, inbound *model.Inbound, email string) []string {
 	svc := p.build(host)
-	svc.projectThroughFallbackMaster(inbound)
+	if inbound.Fronting != nil {
+		projected := *inbound
+		projected.Port = nginxfront.PublicPort
+		inbound = &projected
+	} else {
+		svc.projectThroughFallbackMaster(inbound)
+	}
 	return splitLinkLines(svc.GetLink(inbound, email))
 }
 

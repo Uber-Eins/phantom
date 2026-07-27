@@ -20,6 +20,13 @@ export interface FallbackParentRef {
     path: string;
 }
 
+export interface InboundFrontingRef {
+    inboundId: number;
+    template: string;
+    decoyMode: string;
+    decoyValue?: string;
+}
+
 export type DBInboundInit = Partial<{
     id: number;
     userId: number;
@@ -40,6 +47,7 @@ export type DBInboundInit = Partial<{
     sniffing: RawJsonField;
     clientStats: ClientStats[];
     fallbackParent: FallbackParentRef | null;
+    fronting: InboundFrontingRef | null;
 }>;
 
 export function coerceInboundJsonField(value: unknown): Record<string, unknown> {
@@ -82,6 +90,7 @@ export class DBInbound {
     sniffing: RawJsonField;
     clientStats: ClientStats[];
     fallbackParent: FallbackParentRef | null;
+    fronting: InboundFrontingRef | null;
 
     private _clientStatsMap: Map<string, ClientStats> | null = null;
 
@@ -106,6 +115,7 @@ export class DBInbound {
         this.sniffing = "";
         this.clientStats = [];
         this.fallbackParent = null;
+        this.fronting = null;
         if (data == null) {
             return;
         }
@@ -158,7 +168,7 @@ export class DBInbound {
 
     get address(): string {
         let address = location.hostname;
-        if (!ObjectUtil.isEmpty(this.listen) && this.listen !== "0.0.0.0") {
+        if (!this.fronting && !ObjectUtil.isEmpty(this.listen) && this.listen !== "0.0.0.0") {
             address = this.listen;
         }
         return address;

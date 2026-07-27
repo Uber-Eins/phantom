@@ -46,6 +46,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.GET("/xrayObservatoryHistory/:tag/:bucket", a.getXrayObservatoryHistoryBucket)
 	g.GET("/getXrayVersion", a.getXrayVersion)
 	g.GET("/getConfigJson", a.getConfigJson)
+	g.GET("/getNginxConfig", a.getNginxConfig)
 	g.GET("/getDb", a.getDb)
 	g.GET("/getNewUUID", a.getNewUUID)
 	g.GET("/getNewX25519Cert", a.getNewX25519Cert)
@@ -222,7 +223,11 @@ func (a *ServerController) installXray(c *gin.Context) {
 
 // getLogs retrieves the in-process application logs based on count and level.
 func (a *ServerController) getLogs(c *gin.Context) {
-	logs := a.serverService.GetLogs(c.Param("count"), c.PostForm("level"))
+	logs := a.serverService.GetLogs(
+		c.Param("count"),
+		c.PostForm("level"),
+		c.PostForm("source"),
+	)
 	jsonObj(c, logs, nil)
 }
 
@@ -249,6 +254,16 @@ func (a *ServerController) getConfigJson(c *gin.Context) {
 		return
 	}
 	jsonObj(c, configJson, nil)
+}
+
+// getNginxConfig retrieves the generated Nginx configuration as plain text.
+func (a *ServerController) getNginxConfig(c *gin.Context) {
+	configText, err := a.serverService.GetNginxConfig()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.index.getConfigError"), err)
+		return
+	}
+	jsonObj(c, configText, nil)
 }
 
 // getDb downloads the database file.

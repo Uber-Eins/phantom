@@ -19,6 +19,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
+	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/controller"
@@ -292,9 +293,15 @@ const (
 // jobs) which the panel relies on for periodic maintenance and monitoring.
 func (s *Server) startTask(restartXray bool) {
 	if restartXray {
+		if err := nginxfront.PrepareRuntimeDir(); err != nil {
+			logger.Warning("prepare nginx fronting runtime failed:", err)
+		}
 		err := s.xrayService.RestartXray(true)
 		if err != nil {
 			logger.Warning("start xray failed:", err)
+		}
+		if err := nginxfront.Reconcile(); err != nil {
+			logger.Warning("start nginx fronting failed:", err)
 		}
 	}
 	// Check whether xray is running every second
@@ -470,6 +477,7 @@ func (s *Server) stop(stopXray bool) error {
 	s.cancel()
 	if stopXray {
 		_ = s.xrayService.StopXray()
+		_ = nginxfront.Stop()
 		mtproto.GetManager().StopAll()
 	}
 	if s.cron != nil {

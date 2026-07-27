@@ -404,6 +404,21 @@
       "vlessAuthSelected": "Selected: {auth}",
       "vlessAuthGenerate": "Generate keys",
       "vlessAuthGenerateButton": "Generate",
+      "guide": {
+        "tab": "Configuration guide",
+        "summary": "Nginx owns TCP/443 and routes traffic by SNI to a managed Unix socket created by Xray under /run/xray; the Xray inbound port is 0.",
+        "template": "Configuration template",
+        "templatePlaceholder": "Select a VLESS template",
+        "decoy": "Camouflage site",
+        "decoyUnauthorized": "Nginx 401 Unauthorized",
+        "decoyProxy": "Reverse proxy remote site",
+        "decoyStatic": "Serve local site",
+        "proxyTarget": "Reverse proxy target",
+        "staticPath": "Local site path",
+        "staticWarning": "The path must exist and be readable inside the container. Paths outside /etc/x-ui require an additional container mount.",
+        "realityDecoy": "Failed REALITY authentication is forwarded to the configured target, matching Xray's native behavior.",
+        "decoyValueRequired": "Enter the camouflage target or local site path."
+      },
       "advanced": {
         "title": "Inbound JSON sections",
         "subtitle": "Full inbound JSON and focused editors for settings, sniffing, and streamSettings.",

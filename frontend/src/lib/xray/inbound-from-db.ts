@@ -7,6 +7,7 @@ import { fillStreamDefaults } from './stream-defaults';
 export interface DbInboundLike {
   port: number;
   listen: string;
+  fronting?: unknown;
   protocol: string;
   settings: unknown;
   streamSettings: unknown;
@@ -39,7 +40,7 @@ export function inboundFromDb(raw: DbInboundLike): Inbound {
     : fillStreamDefaults(streamSettingsRaw);
   return {
     protocol: raw.protocol,
-    port: raw.port,
+    port: raw.fronting ? 443 : raw.port,
     listen: raw.listen ?? '',
     tag: raw.tag ?? '',
     remark: raw.remark ?? '',

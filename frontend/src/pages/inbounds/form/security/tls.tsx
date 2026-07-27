@@ -38,9 +38,18 @@ interface CertRowProps {
   onRemove: () => void;
   setCertFromPanel: (certName: number) => void;
   clearCertFiles: (certName: number) => void;
+  compact?: boolean;
 }
 
-function CertRow({ index, total, saving, onRemove, setCertFromPanel, clearCertFiles }: CertRowProps) {
+function CertRow({
+  index,
+  total,
+  saving,
+  onRemove,
+  setCertFromPanel,
+  clearCertFiles,
+  compact = false,
+}: CertRowProps) {
   const { t } = useTranslation();
   const { control } = useFormContext();
   const useFile = useWatch({ control, name: `streamSettings.tlsSettings.certificates.${index}.useFile` });
@@ -114,38 +123,66 @@ function CertRow({ index, total, saving, onRemove, setCertFromPanel, clearCertFi
           </FormField>
         </>
       )}
-      <FormField
-        name={['streamSettings', 'tlsSettings', 'certificates', index, 'ocspStapling']}
-        label="OCSP Stapling"
-      >
-        <InputNumber min={0} suffix="s" style={{ width: '50%' }} />
-      </FormField>
-      <FormField
-        name={['streamSettings', 'tlsSettings', 'certificates', index, 'oneTimeLoading']}
-        label={t('pages.inbounds.form.oneTimeLoading')}
-        valueProp="checked"
-      >
-        <Switch />
-      </FormField>
-      <FormField
-        name={['streamSettings', 'tlsSettings', 'certificates', index, 'usage']}
-        label={t('pages.inbounds.form.usageOption')}
-      >
-        <Select
-          style={{ width: '50%' }}
-          options={Object.values(USAGE_OPTION).map((u) => ({ value: u, label: u }))}
-        />
-      </FormField>
-      {usage === 'issue' && (
-        <FormField
-          name={['streamSettings', 'tlsSettings', 'certificates', index, 'buildChain']}
-          label={t('pages.inbounds.form.buildChain')}
-          valueProp="checked"
-        >
-          <Switch />
-        </FormField>
+      {!compact && (
+        <>
+          <FormField
+            name={['streamSettings', 'tlsSettings', 'certificates', index, 'ocspStapling']}
+            label="OCSP Stapling"
+          >
+            <InputNumber min={0} suffix="s" style={{ width: '50%' }} />
+          </FormField>
+          <FormField
+            name={['streamSettings', 'tlsSettings', 'certificates', index, 'oneTimeLoading']}
+            label={t('pages.inbounds.form.oneTimeLoading')}
+            valueProp="checked"
+          >
+            <Switch />
+          </FormField>
+          <FormField
+            name={['streamSettings', 'tlsSettings', 'certificates', index, 'usage']}
+            label={t('pages.inbounds.form.usageOption')}
+          >
+            <Select
+              style={{ width: '50%' }}
+              options={Object.values(USAGE_OPTION).map((u) => ({ value: u, label: u }))}
+            />
+          </FormField>
+          {usage === 'issue' && (
+            <FormField
+              name={['streamSettings', 'tlsSettings', 'certificates', index, 'buildChain']}
+              label={t('pages.inbounds.form.buildChain')}
+              valueProp="checked"
+            >
+              <Switch />
+            </FormField>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+export interface PrimaryCertificateFieldsProps {
+  saving: boolean;
+  setCertFromPanel: (certName: number) => void;
+  clearCertFiles: (certName: number) => void;
+}
+
+export function PrimaryCertificateFields({
+  saving,
+  setCertFromPanel,
+  clearCertFiles,
+}: PrimaryCertificateFieldsProps) {
+  return (
+    <CertRow
+      index={0}
+      total={1}
+      compact
+      saving={saving}
+      onRemove={() => undefined}
+      setCertFromPanel={setCertFromPanel}
+      clearCertFiles={clearCertFiles}
+    />
   );
 }
 

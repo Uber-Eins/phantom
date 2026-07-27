@@ -4,11 +4,11 @@ package logger
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
-	"time"
+	"strings"
 
 	"github.com/op/go-logging"
 
@@ -29,52 +29,72 @@ const (
 	compressRotated = true
 )
 
+// Source identifies the process that emitted a log entry.
+type Source string
+
+const (
+	SourceXUI   Source = "x-ui"
+	SourceXray  Source = "xray-core"
+	SourceNginx Source = "nginx"
+)
+
 var (
 	// Initialized to a usable default so logging never nil-derefs before InitLogger
 	// runs — the "migrate" and "setting" CLI subcommands log without calling it.
-	logger     = logging.MustGetLogger("x-ui")
-	fileRotate *lumberjack.Logger // nil when file backend disabled
-
-	// logBuffer maintains recent log entries in memory for web UI retrieval;
-	// logBufferMu guards it — written from many goroutines, read by the web UI.
-	logBufferMu sync.Mutex
-	logBuffer   []struct {
-		time  string
-		level logging.Level
-		log   string
+	logger        = logging.MustGetLogger(string(SourceXUI))
+	sourceLoggers = map[Source]*logging.Logger{
+		SourceXUI:   logger,
+		SourceXray:  logging.MustGetLogger(string(SourceXray)),
+		SourceNginx: logging.MustGetLogger(string(SourceNginx)),
 	}
+	fileRotate *lumberjack.Logger // nil when file backend disabled
 )
 
 // InitLogger initializes dual logging backends: console/syslog and file.
 // Console logging uses the specified level, file logging always uses DEBUG level.
 func InitLogger(level logging.Level) {
-	newLogger := logging.MustGetLogger("x-ui")
 	backends := make([]logging.Backend, 0, 2)
 
 	// Console/syslog backend with configurable level
-	consoleBackend := initDefaultBackend()
+	consoleBackend, consoleErr := initDefaultBackend()
 	leveledBackend := logging.AddModuleLevel(consoleBackend)
-	leveledBackend.SetLevel(level, "x-ui")
+	for source := range sourceLoggers {
+		leveledBackend.SetLevel(level, string(source))
+	}
 	backends = append(backends, leveledBackend)
 
 	// File backend with DEBUG level for comprehensive logging
-	if fileBackend := initFileBackend(); fileBackend != nil {
+	fileBackend, fileErr := initFileBackend()
+	if fileBackend != nil {
 		leveledBackend := logging.AddModuleLevel(fileBackend)
-		leveledBackend.SetLevel(logging.DEBUG, "x-ui")
+		for source := range sourceLoggers {
+			leveledBackend.SetLevel(logging.DEBUG, string(source))
+		}
 		backends = append(backends, leveledBackend)
 	}
 
 	multiBackend := logging.MultiLogger(backends...)
-	newLogger.SetBackend(multiBackend)
-	logger = newLogger
+	for _, sourceLogger := range sourceLoggers {
+		sourceLogger.SetBackend(multiBackend)
+	}
+	logger = sourceLoggers[SourceXUI]
+	slog.SetDefault(slog.New(newSlogHandler()))
+
+	if consoleErr != nil {
+		Warning("syslog backend disabled:", consoleErr)
+	}
+	if fileErr != nil {
+		Warning("file log backend disabled:", fileErr)
+	}
 }
 
 // initDefaultBackend creates the console/syslog logging backend.
 // Windows: Uses stderr directly (no syslog support)
 // Unix-like: Attempts syslog, falls back to stderr
-func initDefaultBackend() logging.Backend {
+func initDefaultBackend() (logging.Backend, error) {
 	var backend logging.Backend
 	includeTime := false
+	var backendErr error
 
 	if runtime.GOOS == "windows" {
 		// Windows: Use stderr directly (no syslog support)
@@ -83,24 +103,23 @@ func initDefaultBackend() logging.Backend {
 	} else {
 		// Unix-like: Try syslog, fallback to stderr
 		if syslogBackend, err := logging.NewSyslogBackend(""); err != nil {
-			fmt.Fprintf(os.Stderr, "syslog backend disabled: %v\n", err)
+			backendErr = err
 			backend = logging.NewLogBackend(os.Stderr, "", 0)
-			includeTime = os.Getppid() > 0
+			includeTime = true
 		} else {
 			backend = syslogBackend
 		}
 	}
 
-	return logging.NewBackendFormatter(backend, newFormatter(includeTime))
+	return logging.NewBackendFormatter(backend, newFormatter(includeTime)), backendErr
 }
 
 // initFileBackend creates the file logging backend with size/age‑bounded rotation
 // so log volume cannot grow without limit on disk.
-func initFileBackend() logging.Backend {
+func initFileBackend() (logging.Backend, error) {
 	logDir := config.GetLogFolder()
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create log folder %s: %v\n", logDir, err)
-		return nil
+		return nil, fmt.Errorf("create log folder %s: %w", logDir, err)
 	}
 
 	logPath := filepath.Join(logDir, logFileName)
@@ -114,14 +133,14 @@ func initFileBackend() logging.Backend {
 	}
 
 	backend := logging.NewLogBackend(fileRotate, "", 0)
-	return logging.NewBackendFormatter(backend, newFormatter(true))
+	return logging.NewBackendFormatter(backend, newFormatter(true)), nil
 }
 
 // newFormatter creates a log formatter with optional timestamp.
 func newFormatter(withTime bool) logging.Formatter {
-	format := `%{level} - %{message}`
+	format := `%{level} [%{module}] %{message}`
 	if withTime {
-		format = `%{time:` + timeFormat + `} %{level} - %{message}`
+		format = `%{time:` + timeFormat + `} %{level} [%{module}] %{message}`
 	}
 	return logging.MustStringFormatter(format)
 }
@@ -137,106 +156,95 @@ func CloseLogger() {
 
 // Debug logs a debug message and adds it to the log buffer.
 func Debug(args ...any) {
-	logger.Debug(args...)
-	addToBuffer("DEBUG", fmt.Sprint(args...))
+	write(SourceXUI, logging.DEBUG, formatArgs(args...))
 }
 
 // Debugf logs a formatted debug message and adds it to the log buffer.
 func Debugf(format string, args ...any) {
-	logger.Debugf(format, args...)
-	addToBuffer("DEBUG", fmt.Sprintf(format, args...))
+	write(SourceXUI, logging.DEBUG, fmt.Sprintf(format, args...))
 }
 
 // Info logs an info message and adds it to the log buffer.
 func Info(args ...any) {
-	logger.Info(args...)
-	addToBuffer("INFO", fmt.Sprint(args...))
+	write(SourceXUI, logging.INFO, formatArgs(args...))
 }
 
 // Infof logs a formatted info message and adds it to the log buffer.
 func Infof(format string, args ...any) {
-	logger.Infof(format, args...)
-	addToBuffer("INFO", fmt.Sprintf(format, args...))
+	write(SourceXUI, logging.INFO, fmt.Sprintf(format, args...))
 }
 
 // Notice logs a notice message and adds it to the log buffer.
 func Notice(args ...any) {
-	logger.Notice(args...)
-	addToBuffer("NOTICE", fmt.Sprint(args...))
+	write(SourceXUI, logging.NOTICE, formatArgs(args...))
 }
 
 // Noticef logs a formatted notice message and adds it to the log buffer.
 func Noticef(format string, args ...any) {
-	logger.Noticef(format, args...)
-	addToBuffer("NOTICE", fmt.Sprintf(format, args...))
+	write(SourceXUI, logging.NOTICE, fmt.Sprintf(format, args...))
 }
 
 // Warning logs a warning message and adds it to the log buffer.
 func Warning(args ...any) {
-	logger.Warning(args...)
-	addToBuffer("WARNING", fmt.Sprint(args...))
+	write(SourceXUI, logging.WARNING, formatArgs(args...))
 }
 
 // Warningf logs a formatted warning message and adds it to the log buffer.
 func Warningf(format string, args ...any) {
-	logger.Warningf(format, args...)
-	addToBuffer("WARNING", fmt.Sprintf(format, args...))
+	write(SourceXUI, logging.WARNING, fmt.Sprintf(format, args...))
 }
 
 // Error logs an error message and adds it to the log buffer.
 func Error(args ...any) {
-	logger.Error(args...)
-	addToBuffer("ERROR", fmt.Sprint(args...))
+	write(SourceXUI, logging.ERROR, formatArgs(args...))
 }
 
 // Errorf logs a formatted error message and adds it to the log buffer.
 func Errorf(format string, args ...any) {
-	logger.Errorf(format, args...)
-	addToBuffer("ERROR", fmt.Sprintf(format, args...))
+	write(SourceXUI, logging.ERROR, fmt.Sprintf(format, args...))
 }
 
-// addToBuffer adds a log entry to the in-memory ring buffer for web UI retrieval.
-func addToBuffer(level string, newLog string) {
-	t := time.Now()
-	logBufferMu.Lock()
-	defer logBufferMu.Unlock()
-	if len(logBuffer) >= maxLogBufferSize {
-		logBuffer = logBuffer[1:]
-	}
-
-	logLevel, _ := logging.LogLevel(level)
-	logBuffer = append(logBuffer, struct {
-		time  string
-		level logging.Level
-		log   string
-	}{
-		time:  t.Format(timeFormat),
-		level: logLevel,
-		log:   newLog,
-	})
+func SourceDebug(source Source, args ...any) {
+	write(source, logging.DEBUG, formatArgs(args...))
 }
 
-// GetLogs retrieves up to c log entries from the buffer that are at or below the specified level.
-func GetLogs(c int, level string) []string {
-	var output []string
-	logLevel, _ := logging.LogLevel(level)
+func SourceInfo(source Source, args ...any) {
+	write(source, logging.INFO, formatArgs(args...))
+}
 
-	// Snapshot (copy) under the lock, then filter/format unlocked: a UI log fetch
-	// must not block addToBuffer — and thus all logging — for the formatting loop.
-	// A copy (not a reslice) is required, since addToBuffer can append in place.
-	logBufferMu.Lock()
-	snapshot := make([]struct {
-		time  string
-		level logging.Level
-		log   string
-	}, len(logBuffer))
-	copy(snapshot, logBuffer)
-	logBufferMu.Unlock()
+func SourceNotice(source Source, args ...any) {
+	write(source, logging.NOTICE, formatArgs(args...))
+}
 
-	for i := len(snapshot) - 1; i >= 0 && len(output) < c; i-- {
-		if snapshot[i].level <= logLevel {
-			output = append(output, fmt.Sprintf("%s %s - %s", snapshot[i].time, snapshot[i].level, snapshot[i].log))
-		}
+func SourceWarning(source Source, args ...any) {
+	write(source, logging.WARNING, formatArgs(args...))
+}
+
+func SourceError(source Source, args ...any) {
+	write(source, logging.ERROR, formatArgs(args...))
+}
+
+func formatArgs(args ...any) string {
+	return strings.TrimSuffix(fmt.Sprintln(args...), "\n")
+}
+
+func write(source Source, level logging.Level, message string) {
+	target, ok := sourceLoggers[source]
+	if !ok {
+		source = SourceXUI
+		target = logger
 	}
-	return output
+	switch level {
+	case logging.DEBUG:
+		target.Debug(message)
+	case logging.INFO:
+		target.Info(message)
+	case logging.NOTICE:
+		target.Notice(message)
+	case logging.WARNING:
+		target.Warning(message)
+	default:
+		target.Error(message)
+	}
+	addSourceToBuffer(source, level, message)
 }

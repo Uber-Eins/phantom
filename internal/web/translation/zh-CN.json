@@ -404,6 +404,21 @@
       "vlessAuthSelected": "已选择：{auth}",
       "vlessAuthGenerate": "生成密钥",
       "vlessAuthGenerateButton": "生成",
+      "guide": {
+        "tab": "配置向导",
+        "summary": "由 Nginx 监听 TCP/443，并按 SNI 将流量转发到 /run/xray 下由 Xray 创建的受管 Unix socket；Xray 入站端口为 0。",
+        "template": "配置模板",
+        "templatePlaceholder": "选择 VLESS 配置模板",
+        "decoy": "伪装站",
+        "decoyUnauthorized": "Nginx 401 Unauthorized",
+        "decoyProxy": "反向代理远程站点",
+        "decoyStatic": "显示本地站点",
+        "proxyTarget": "反向代理目标",
+        "staticPath": "本地站点路径",
+        "staticWarning": "路径必须存在于容器内且可读。/etc/x-ui 以外的路径需要额外添加容器挂载。",
+        "realityDecoy": "REALITY 认证失败的流量会转发到已配置的目标，与 Xray 原始行为一致。",
+        "decoyValueRequired": "请填写伪装站目标或本地站点路径。"
+      },
       "advanced": {
         "title": "入站 JSON 部分",
         "subtitle": "完整入站 JSON 以及针对 settings、sniffing 和 streamSettings 的专用编辑器。",

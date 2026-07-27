@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { EditorView, basicSetup } from 'codemirror';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, Compartment, type Extension } from '@codemirror/state';
 import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { lintGutter, linter } from '@codemirror/lint';
 import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
@@ -18,6 +18,7 @@ export interface JsonEditorProps {
   minHeight?: string;
   maxHeight?: string;
   readOnly?: boolean;
+  language?: 'json' | 'text';
 }
 
 export interface JsonEditorHandle {
@@ -82,14 +83,27 @@ function themeExtension(isDark: boolean, isUltra: boolean) {
   return [chrome, syntaxHighlighting(oneDarkHighlightStyle)];
 }
 
+function languageExtension(language: 'json' | 'text'): Extension {
+  if (language === 'text') return [];
+  return [json(), linter(jsonParseLinter()), lintGutter()];
+}
+
 const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEditor(
-  { value, onChange, minHeight = '320px', maxHeight = '600px', readOnly = false },
+  {
+    value,
+    onChange,
+    minHeight = '320px',
+    maxHeight = '600px',
+    readOnly = false,
+    language = 'json',
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartmentRef = useRef<Compartment>(new Compartment());
   const readonlyCompartmentRef = useRef<Compartment>(new Compartment());
+  const languageCompartmentRef = useRef<Compartment>(new Compartment());
   const onChangeRef = useRef(onChange);
   const valueRef = useRef(value);
   const { isDark, isUltra } = useTheme();
@@ -122,9 +136,7 @@ const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEd
           basicSetup,
           EditorView.contentAttributes.of({ 'aria-label': t('jsonEditor') }),
           keymap.of([indentWithTab]),
-          json(),
-          linter(jsonParseLinter()),
-          lintGutter(),
+          languageCompartmentRef.current.of(languageExtension(language)),
           EditorView.lineWrapping,
           updateListener,
           themeCompartmentRef.current.of(themeExtension(isDark, isUltra)),
@@ -175,6 +187,14 @@ const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEd
       effects: readonlyCompartmentRef.current.reconfigure(EditorState.readOnly.of(readOnly)),
     });
   }, [readOnly]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: languageCompartmentRef.current.reconfigure(languageExtension(language)),
+    });
+  }, [language]);
 
   return <div ref={hostRef} className="json-editor-host" aria-label={t('jsonEditor')} />;
 });

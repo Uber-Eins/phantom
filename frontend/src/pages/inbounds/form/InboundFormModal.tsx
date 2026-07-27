@@ -76,11 +76,21 @@ import {
   WsForm,
   XhttpForm,
 } from './transport';
-import { RealityForm, TlsForm } from './security';
+import { PrimaryCertificateFields, RealityForm, TlsForm } from './security';
 import { useSecurityActions } from './useSecurityActions';
 import { useInboundFallbacks } from './useInboundFallbacks';
 import FallbacksCard from './FallbacksCard';
 import SniffingTab from './SniffingTab';
+import {
+  createGuidedDraft,
+  createGuidedStreamBase,
+  buildGuidedInboundRequest,
+  guidedSocketPath,
+  guidedTemplateName,
+  GuidedInboundTab,
+  type GuidedDraft,
+  type GuidedTemplate,
+} from './guided';
 
 import type { DBInbound } from '@/models/dbinbound';
 
@@ -162,6 +172,8 @@ export default function InboundFormModal({
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<RealityScanResult | null>(null);
+  const [guidedDraft, setGuidedDraft] = useState<GuidedDraft | null>(null);
+  const [activeTab, setActiveTab] = useState(mode === 'add' ? 'guided' : 'basic');
   const {
     fallbacks,
     fallbackChildOptions,
@@ -218,6 +230,7 @@ export default function InboundFormModal({
     (protocol === Protocols.VLESS || protocol === Protocols.TROJAN)
     && network === 'tcp'
     && (security === 'tls' || security === 'reality');
+  const topologyLocked = guidedDraft !== null || (mode === 'edit' && !!dbInbound?.fronting);
 
   const {
     genRealityKeypair,
@@ -310,6 +323,8 @@ export default function InboundFormModal({
       ? rawInboundToFormValues(dbInbound)
       : buildAddModeValues();
     methods.reset(initial);
+    setGuidedDraft(null);
+    setActiveTab(mode === 'add' ? 'guided' : 'basic');
     setScanResult(null);
     const initialTag = (initial.tag ?? '') as string;
     autoTagRef.current = isAutoInboundTag(initialTag, {
@@ -322,6 +337,7 @@ export default function InboundFormModal({
     if (
       mode === 'edit'
       && dbInbound
+      && !dbInbound.fronting
       && (dbInbound.protocol === Protocols.VLESS || dbInbound.protocol === Protocols.TROJAN)
     ) {
       loadFallbacks(dbInbound.id);
@@ -390,7 +406,37 @@ export default function InboundFormModal({
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [mode, methods]);
 
+  const onGuidedTemplateChange = async (template?: GuidedTemplate) => {
+    if (!template) {
+      autoTagRef.current = true;
+      setGuidedDraft(null);
+      methods.reset(buildAddModeValues());
+      return;
+    }
+
+    const draft = createGuidedDraft(template);
+    setGuidedDraft(draft);
+    setSaving(true);
+    try {
+      const templateName = guidedTemplateName(template);
+      autoTagRef.current = false;
+      setV('protocol', Protocols.VLESS);
+      setV('port', 0);
+      setV('listen', guidedSocketPath(template));
+      setV('tag', templateName);
+      setV('settings', createDefaultInboundSettings(Protocols.VLESS));
+      setV('streamSettings', createGuidedStreamBase(template));
+      await onSecurityChange(draft.security);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const submit = async () => {
+    if (mode === 'add' && activeTab === 'guided' && !guidedDraft) {
+      messageApi.warning(t('pages.inbounds.guide.templatePlaceholder'));
+      return;
+    }
     if (!(await methods.trigger())) return;
     /*
      * getValues() returns the entire form store, including settings.clients and
@@ -410,15 +456,32 @@ export default function InboundFormModal({
       );
       return;
     }
+    if (
+      guidedDraft
+      && (guidedDraft.decoyMode === 'proxy' || guidedDraft.decoyMode === 'static')
+      && guidedDraft.decoyValue.trim() === ''
+    ) {
+      messageApi.warning(t('pages.inbounds.guide.decoyValueRequired'));
+      return;
+    }
     setSaving(true);
     try {
       const payload = formValuesToWirePayload(parsed.data);
       const url = mode === 'edit' && dbInbound
         ? `/panel/api/inbounds/update/${dbInbound.id}`
-        : '/panel/api/inbounds/add';
-      const msg = await HttpUtil.post(url, payload);
+        : guidedDraft
+          ? '/panel/api/inbounds/add-guided'
+          : '/panel/api/inbounds/add';
+      const guidedRequest = guidedDraft
+        ? buildGuidedInboundRequest(payload, guidedDraft)
+        : null;
+      const msg = await HttpUtil.post(
+        url,
+        guidedRequest?.body ?? payload,
+        guidedRequest?.options ?? {},
+      );
       if (msg?.success) {
-        if (isFallbackHost) {
+        if (isFallbackHost && !topologyLocked) {
           const obj = msg.obj as { id?: number; Id?: number } | null;
           const masterId = mode === 'edit'
             ? dbInbound!.id
@@ -452,14 +515,14 @@ export default function InboundFormModal({
       </FormField>
 
       <FormField name="protocol" label={t('pages.inbounds.protocol')}>
-        <Select id="protocol" disabled={mode === 'edit'} options={PROTOCOL_OPTIONS} />
+        <Select id="protocol" disabled={mode === 'edit' || topologyLocked} options={PROTOCOL_OPTIONS} />
       </FormField>
 
       <FormField
         name="listen"
         label={labelWithHint(t('pages.inbounds.address'), t('pages.inbounds.form.listenHelp'))}
       >
-        <Input placeholder={t('pages.inbounds.monitorDesc')} />
+        <Input disabled={topologyLocked} placeholder={t('pages.inbounds.monitorDesc')} />
       </FormField>
 
       <FormField
@@ -467,7 +530,7 @@ export default function InboundFormModal({
         label={t('pages.inbounds.port')}
         rules={{ validate: rhfZodValidate(InboundFormBaseSchema.shape.port) }}
       >
-        <InputNumber min={isUdsListen ? 0 : 1} max={65535} />
+        <InputNumber disabled={topologyLocked} min={isUdsListen ? 0 : 1} max={65535} />
       </FormField>
 
       <Form.Item
@@ -541,7 +604,7 @@ export default function InboundFormModal({
 
       {protocol === Protocols.VLESS && <VlessFields saving={saving} selectedVlessAuth={selectedVlessAuth} vlessAuthKind={vlessAuthKind} network={network} security={security} getNewVlessEnc={getNewVlessEnc} clearVlessEnc={clearVlessEnc} />}
 
-      {isFallbackHost && fallbacksCard}
+      {isFallbackHost && !topologyLocked && fallbacksCard}
       {(protocol === Protocols.VLESS || protocol === Protocols.TROJAN)
         && network === 'tcp' && !isFallbackHost && (
           <Alert
@@ -597,6 +660,7 @@ export default function InboundFormModal({
           <Select
             style={{ width: '75%' }}
             value={network}
+            disabled={topologyLocked}
             onChange={onNetworkChange}
             options={[
               { value: 'tcp', label: 'RAW' },
@@ -663,7 +727,7 @@ export default function InboundFormModal({
         <Radio.Group
           value={security}
           buttonStyle="solid"
-          disabled={!tlsOk}
+          disabled={!tlsOk || topologyLocked}
           onChange={(e) => onSecurityChange(e.target.value)}
         >
           {!tlsOnly && <Radio.Button value="none">{t('none')}</Radio.Button>}
@@ -672,7 +736,20 @@ export default function InboundFormModal({
         </Radio.Group>
       </Form.Item>
 
-      {security === 'tls' && (
+      {security === 'tls' && topologyLocked && (
+        <>
+          <FormField name={['streamSettings', 'tlsSettings', 'serverName']} label="SNI">
+            <Input placeholder={t('pages.inbounds.form.serverNameIndication')} />
+          </FormField>
+          <PrimaryCertificateFields
+            saving={saving}
+            setCertFromPanel={setCertFromPanel}
+            clearCertFiles={clearCertFiles}
+          />
+        </>
+      )}
+
+      {security === 'tls' && !topologyLocked && (
         <TlsForm
           saving={saving}
           setCertFromPanel={setCertFromPanel}
@@ -792,6 +869,25 @@ export default function InboundFormModal({
   );
 
   const sniffingTab = <SniffingTab />;
+  const guidedTab = (
+    <GuidedInboundTab
+      draft={guidedDraft}
+      disabled={saving}
+      onTemplateChange={(template) => void onGuidedTemplateChange(template)}
+      onDraftChange={setGuidedDraft}
+      selectedVlessAuth={selectedVlessAuth}
+      vlessAuthKind={vlessAuthKind}
+      getNewVlessEnc={getNewVlessEnc}
+      clearVlessEnc={clearVlessEnc}
+      setCertFromPanel={setCertFromPanel}
+      clearCertFiles={clearCertFiles}
+      scanning={scanning}
+      scanResult={scanResult}
+      scanRealityTarget={scanRealityTarget}
+      scanRealityCandidates={scanRealityCandidates}
+      applyRealityScanResult={applyRealityScanResult}
+    />
+  );
 
   return (
     <>
@@ -815,7 +911,18 @@ export default function InboundFormModal({
             wrapperCol={{ sm: { span: 14 } }}
             labelWrap
           >
-            <Tabs items={[
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={[
+              ...(mode === 'add'
+                ? [{
+                  key: 'guided',
+                  label: t('pages.inbounds.guide.tab'),
+                  children: guidedTab,
+                  forceRender: true,
+                }]
+                : []),
               { key: 'basic', label: t('pages.xray.basicTemplate'), children: basicTab, forceRender: true },
               ...(([
                 Protocols.VLESS,
@@ -840,8 +947,11 @@ export default function InboundFormModal({
               ...(sniffingSupported
                 ? [{ key: 'sniffing', label: t('pages.inbounds.sniffingTab'), children: sniffingTab, forceRender: true }]
                 : []),
-              { key: 'advanced', label: t('pages.xray.advancedTemplate'), children: advancedTab, forceRender: true },
-            ]} />
+              ...(!topologyLocked
+                ? [{ key: 'advanced', label: t('pages.xray.advancedTemplate'), children: advancedTab, forceRender: true }]
+                : []),
+              ]}
+            />
           </Form>
         </FormProvider>
       </Modal>

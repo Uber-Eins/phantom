@@ -78,6 +78,11 @@ type Inbound struct {
 	// the master's externally reachable endpoint instead of the child's
 	// loopback listen. Not persisted.
 	FallbackParent *FallbackParentInfo `json:"fallbackParent,omitempty" gorm:"-"`
+
+	// Fronting is populated for inbounds created by the Nginx 443 guide.
+	// The stored Xray-facing listener is a Unix socket with Port 0. The marker
+	// lets clients advertise Nginx's public 443 endpoint and locks topology fields.
+	Fronting *InboundFronting `json:"fronting,omitempty" gorm:"-"`
 }
 
 // FallbackParentInfo carries everything the frontend needs to rewrite a
@@ -752,6 +757,18 @@ type InboundFallback struct {
 }
 
 func (InboundFallback) TableName() string { return "inbound_fallbacks" }
+
+// InboundFronting marks an inbound whose public TCP entrypoint is owned by
+// the panel-managed Nginx process. Security and transport details remain in
+// the inbound row; this table stores only guide-owned routing behaviour.
+type InboundFronting struct {
+	InboundId  int    `json:"inboundId" gorm:"primaryKey;column:inbound_id"`
+	Template   string `json:"template" gorm:"not null"`
+	DecoyMode  string `json:"decoyMode" gorm:"not null;column:decoy_mode"`
+	DecoyValue string `json:"decoyValue,omitempty" gorm:"column:decoy_value"`
+}
+
+func (InboundFronting) TableName() string { return "inbound_frontings" }
 
 func (c *Client) ToRecord() *ClientRecord {
 	rec := &ClientRecord{

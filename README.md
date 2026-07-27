@@ -17,7 +17,7 @@ Phantom 是面向个人单机部署的 Xray WebUI。它保留登录与 2FA、仪
 sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
 ```
 
-要持久化此值，请按发行版方式写入 sysctl 配置。面板默认监听 `2053`，本机 Xray 入站可使用 `80–65535`。
+要持久化此值，请按发行版方式写入 sysctl 配置。面板默认监听 `2053`，本机 Xray 入站可使用 `80–65535`。“添加入站”中的配置向导会由镜像内置的 Nginx 监听 TCP/443，再将流量转发到 `/run/xray/<配置模板名称>`；对应 Xray 入站使用 Unix socket 和端口 `0`。
 
 ## 安装
 

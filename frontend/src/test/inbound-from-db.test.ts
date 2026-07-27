@@ -47,6 +47,25 @@ describe('inboundFromDb', () => {
     expect((inbound.streamSettings as { network?: string })?.network).toBe('tcp');
   });
 
+  it('projects a guided Unix-socket inbound through Nginx port 443 for links', () => {
+    const inbound = inboundFromDb({
+      ...BASE_DB_FIELDS,
+      port: 0,
+      listen: '/run/xray/VLESS-TCP-TLS',
+      fronting: {
+        inboundId: 1,
+        template: 'vless-tcp-tls',
+        decoyMode: 'unauthorized',
+      },
+      protocol: 'vless',
+      settings: { clients: [], decryption: 'none', encryption: 'none' },
+      streamSettings: { network: 'tcp', security: 'tls' },
+    });
+
+    expect(inbound.port).toBe(443);
+    expect(inbound.listen).toBe('/run/xray/VLESS-TCP-TLS');
+  });
+
   it('fills schema defaults onto partial object settings', () => {
     const settings = { clients: [], decryption: 'none' };
     const raw = {
