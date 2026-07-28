@@ -38,7 +38,7 @@ func newAPIAuthTestEngine(t *testing.T) (*gin.Engine, *APIController) {
 	t.Cleanup(func() { _ = database.CloseDB() })
 	engine := gin.New()
 	store := cookie.NewStore([]byte("api-auth-test-secret"))
-	engine.Use(sessions.Sessions("3x-ui", store))
+	engine.Use(sessions.Sessions("phantom", store))
 
 	a := &APIController{}
 

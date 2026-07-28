@@ -174,7 +174,7 @@ export default function IndexPage() {
                     <Card
                       title={
                         <Space>
-                          <span>3X-UI</span>
+                          <span>Phantom</span>
                           {isMobile && displayVersion && (
                             <Tag color="green">{formatPanelVersion(displayVersion)}</Tag>
                           )}

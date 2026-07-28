@@ -28,7 +28,7 @@ func newSPAFallbackTestEngine(t *testing.T) *gin.Engine {
 
 	const basePath = "/admin-random/"
 	engine := gin.New()
-	engine.Use(sessions.Sessions("3x-ui", cookie.NewStore([]byte("spa-fallback-test-secret"))))
+	engine.Use(sessions.Sessions("phantom", cookie.NewStore([]byte("spa-fallback-test-secret"))))
 	engine.Use(func(c *gin.Context) {
 		c.Set("base_path", basePath)
 		c.Set("I18n", func(_ locale.I18nType, key string, _ ...string) string { return key })

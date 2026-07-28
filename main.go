@@ -1,4 +1,4 @@
-// Package main is the entry point for the 3x-ui web panel application.
+// Package main is the entry point for the phantom web panel application.
 // It initializes the database, web server, and handles command-line operations for managing the panel.
 package main
 
@@ -33,7 +33,7 @@ import (
 	"github.com/op/go-logging"
 )
 
-// runWebServer initializes and starts the web server for the 3x-ui panel.
+// runWebServer initializes and starts the web server for the phantom panel.
 func runWebServer() {
 	switch config.GetLogLevel() {
 	case config.Debug:
@@ -341,7 +341,7 @@ func GetListenIP(getListen bool) {
 	}
 }
 
-// migrateDb performs database migration operations for the 3x-ui panel.
+// migrateDb performs database migration operations for the phantom panel.
 func migrateDb() {
 	inboundService := service.InboundService{}
 
@@ -355,7 +355,7 @@ func migrateDb() {
 	fmt.Println("Migration done!")
 }
 
-// main is the entry point of the 3x-ui application.
+// main is the entry point of the phantom application.
 // It parses command-line arguments to run the web server, migrate database, or update settings.
 func main() {
 	if len(os.Args) < 2 {
