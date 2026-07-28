@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons';
 import type { AllSetting } from '@/models/setting';
 import { HttpUtil, LanguageManager } from '@/utils';
+import { onNumber } from '@/utils/onNumber';
 import { SettingListItem } from '@/components/ui';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { catTabLabel } from './catTabLabel';
@@ -135,7 +136,7 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
 
             <SettingListItem paddings="small" title={t('pages.settings.panelPort')} description={t('pages.settings.panelPortDesc')}>
               <InputNumber value={allSetting.webPort} min={1} max={65535} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ webPort: Number(v) || 0 })} />
+                onChange={onNumber((v) => updateSetting({ webPort: v }))} />
             </SettingListItem>
 
             <SettingListItem paddings="small" title={t('pages.settings.panelUrlPath')} description={t('pages.settings.panelUrlPathDesc')}>
@@ -144,7 +145,7 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
 
             <SettingListItem paddings="small" title={t('pages.settings.sessionMaxAge')} description={t('pages.settings.sessionMaxAgeDesc')}>
               <InputNumber value={allSetting.sessionMaxAge} min={60} max={525600} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ sessionMaxAge: Number(v) || 0 })} />
+                onChange={onNumber((v) => updateSetting({ sessionMaxAge: v }))} />
             </SettingListItem>
 
             <SettingListItem
@@ -173,7 +174,7 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
 
             <SettingListItem paddings="small" title={t('pages.settings.pageSize')} description={t('pages.settings.pageSizeDesc')}>
               <InputNumber value={allSetting.pageSize} min={0} max={1000} step={5} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ pageSize: Number(v) || 0 })} />
+                onChange={onNumber((v) => updateSetting({ pageSize: v }))} />
             </SettingListItem>
 
             <SettingListItem paddings="small" title={t('pages.settings.restartXrayOnClientDisable')} description={t('pages.settings.restartXrayOnClientDisableDesc')}>
@@ -199,11 +200,11 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
           <>
             <SettingListItem paddings="small" title={t('pages.settings.expireTimeDiff')} description={t('pages.settings.expireTimeDiffDesc')}>
               <InputNumber value={allSetting.expireDiff} min={0} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ expireDiff: Number(v) || 0 })} />
+                onChange={onNumber((v) => updateSetting({ expireDiff: v }))} />
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.trafficDiff')} description={t('pages.settings.trafficDiffDesc')}>
               <InputNumber value={allSetting.trafficDiff} min={0} max={100} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ trafficDiff: Number(v) || 0 })} />
+                onChange={onNumber((v) => updateSetting({ trafficDiff: v }))} />
             </SettingListItem>
           </>
         ),

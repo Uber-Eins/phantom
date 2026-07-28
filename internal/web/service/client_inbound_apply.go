@@ -424,7 +424,7 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 			}
 			cipher := ""
 			if oldInbound.Protocol == "shadowsocks" {
-				cipher = oldSettings["method"].(string)
+				cipher, _ = oldSettings["method"].(string)
 			}
 			err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
 				"email":        client.Email,
@@ -762,7 +762,7 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 			if clients[0].Enable {
 				cipher := ""
 				if oldInbound.Protocol == "shadowsocks" {
-					cipher = oldSettings["method"].(string)
+					cipher, _ = oldSettings["method"].(string)
 				}
 				err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
 					"email":        clients[0].Email,

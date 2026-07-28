@@ -56,6 +56,15 @@ func buildXhttpExtra(xhttp map[string]any) map[string]any {
 			}
 		}
 	}
+	// Older clients still read the pre-#6258 names from the extra JSON. Emit
+	// aliases after lifting legacy inputs so both old and new clients can
+	// consume the same link.
+	if value, ok := extra["sessionIDPlacement"].(string); ok && value != "" {
+		extra["sessionPlacement"] = value
+	}
+	if value, ok := extra["sessionIDKey"].(string); ok && value != "" {
+		extra["sessionKey"] = value
+	}
 
 	if value, ok := nonZeroShareValue(xhttp["uplinkChunkSize"]); ok {
 		extra["uplinkChunkSize"] = value

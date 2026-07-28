@@ -193,6 +193,11 @@ func TestXrayAPI_E2E(t *testing.T) {
 	if res.Matched {
 		t.Fatalf("TestRoute(no match) = %+v, want unmatched (default outbound)", res)
 	}
+	for _, port := range []int{-1, 65536, 70000} {
+		if _, err := api.TestRoute(RouteTestRequest{Domain: "example.com", Port: port}); err == nil {
+			t.Fatalf("TestRoute accepted the out-of-range port %d", port)
+		}
+	}
 
 	// --- balancer info + override ---
 	info, err := api.GetBalancerInfo("b1")

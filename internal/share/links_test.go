@@ -246,3 +246,21 @@ func TestWireguardLinkUsesLocalKeys(t *testing.T) {
 		t.Errorf("WireGuard params = %v", u.Query())
 	}
 }
+
+func TestBuildXhttpExtraEmitsSessionCompatibilityAliases(t *testing.T) {
+	extra := buildXhttpExtra(map[string]any{
+		"sessionIDPlacement": "header",
+		"sessionIDKey":       "X-Session",
+	})
+
+	for key, want := range map[string]string{
+		"sessionIDPlacement": "header",
+		"sessionPlacement":   "header",
+		"sessionIDKey":       "X-Session",
+		"sessionKey":         "X-Session",
+	} {
+		if got := extra[key]; got != want {
+			t.Errorf("%s = %v, want %q", key, got, want)
+		}
+	}
+}
