@@ -16,6 +16,7 @@ type APIController struct {
 	serverController      *ServerController
 	settingController     *SettingController
 	xraySettingController *XraySettingController
+	certificateController *CertificateController
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
@@ -58,4 +59,5 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// Settings + Xray config management live under the session-only API.
 	a.settingController = NewSettingController(api)
 	a.xraySettingController = NewXraySettingController(api)
+	a.certificateController = NewCertificateController(api)
 }

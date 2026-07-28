@@ -54,6 +54,14 @@ var defaultValueMap = map[string]string{
 	"warpLastUpdate":             "0",
 	"warpUpdateInterval":         "0",
 	"nord":                       "",
+	acmeRenewBeforeDaysKey:       strconv.Itoa(defaultACMERenewBeforeDays),
+	acmeShortRenewBeforeHoursKey: strconv.Itoa(defaultACMEShortRenewHours),
+	acmeShortCheckTimesPerDayKey: strconv.Itoa(defaultACMEShortChecksPerDay),
+	acmeCheckTimeKey:             defaultACMECheckTime,
+	acmeDefaultEmailKey:          "",
+	acmeGlobalPrivateKeyKey:      "",
+	acmeLastRegularCheckAtKey:    "0",
+	acmeLastShortCheckAtKey:      "0",
 }
 
 // SettingService owns the settings that are meaningful to the local panel.

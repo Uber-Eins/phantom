@@ -13,7 +13,16 @@ describe('AppSidebar', () => {
       </MemoryRouter>,
     );
 
-    for (const item of ['Overview', 'Inbounds', 'Clients', 'Outbounds', 'Routing', 'Panel Settings', 'Xray Configs']) {
+    for (const item of [
+      'Overview',
+      'Inbounds',
+      'Clients',
+      'Outbounds',
+      'Routing',
+      'SSL/TLS Certificates',
+      'Panel Settings',
+      'Xray Configs',
+    ]) {
       expect(screen.getAllByText(item).length).toBeGreaterThan(0);
     }
     for (const removed of [

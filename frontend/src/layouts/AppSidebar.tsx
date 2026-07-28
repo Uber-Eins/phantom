@@ -18,6 +18,7 @@ import {
   MoonFilled,
   MoonOutlined,
   ReadOutlined,
+  SafetyCertificateOutlined,
   SafetyOutlined,
   SettingOutlined,
   SunOutlined,
@@ -36,12 +37,22 @@ const DOCS_URL = 'https://github.com/uber-eins/phantom#readme';
 const REPO_URL = 'https://github.com/uber-eins/phantom';
 const LOGOUT_KEY = '__logout__';
 
-type IconName = 'dashboard' | 'inbound' | 'team' | 'setting' | 'tool' | 'logout' | 'outbound' | 'routing';
+type IconName =
+  | 'dashboard'
+  | 'inbound'
+  | 'team'
+  | 'certificate'
+  | 'setting'
+  | 'tool'
+  | 'logout'
+  | 'outbound'
+  | 'routing';
 
 const iconByName: Record<IconName, ComponentType> = {
   dashboard: DashboardOutlined,
   inbound: ImportOutlined,
   team: TeamOutlined,
+  certificate: SafetyCertificateOutlined,
   setting: SettingOutlined,
   tool: ToolOutlined,
   logout: LogoutOutlined,
@@ -130,6 +141,7 @@ export default function AppSidebar() {
     { key: '/clients', icon: 'team', title: t('menu.clients') },
     { key: '/outbound', icon: 'outbound', title: t('menu.outbounds') },
     { key: '/routing', icon: 'routing', title: t('menu.routing') },
+    { key: '/certificates', icon: 'certificate', title: t('menu.certificates') },
     { key: '/settings', icon: 'setting', title: t('menu.settings') },
     { key: '/xray', icon: 'tool', title: t('menu.xray') },
     { key: LOGOUT_KEY, icon: 'logout', title: t('logout') },

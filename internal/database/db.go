@@ -46,6 +46,7 @@ func allModels() []any {
 		&model.InboundFallback{},
 		&model.InboundFronting{},
 		&model.OutboundSubscription{},
+		&model.Certificate{},
 	}
 }
 

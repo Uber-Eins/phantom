@@ -287,6 +287,7 @@ const (
 	cadenceMtproto      = "@every 10s"
 	cadenceOutboundSub  = "@every 5m"
 	cadenceXrayLogPrune = "@every 10m"
+	cadenceACMERenewal  = "@every 1m"
 )
 
 // startTask schedules background jobs (Xray checks, traffic jobs, cron
@@ -326,6 +327,7 @@ func (s *Server) startTask(restartXray bool) {
 	_, _ = s.cron.AddJob(cadenceOutboundSub, job.NewOutboundSubscriptionJob())
 
 	_, _ = s.cron.AddJob(cadenceXrayLogPrune, job.NewPruneXrayLogsJob())
+	_, _ = s.cron.AddJob(cadenceACMERenewal, job.NewCertificateRenewalJob())
 	_, _ = s.cron.AddJob("@hourly", job.NewWarpIpJob())
 
 	// Inbound traffic reset jobs

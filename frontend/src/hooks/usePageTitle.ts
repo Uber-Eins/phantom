@@ -6,6 +6,7 @@ const TITLE_KEYS: Record<string, string> = {
   '/': 'menu.dashboard',
   '/inbounds': 'menu.inbounds',
   '/clients': 'menu.clients',
+  '/certificates': 'menu.certificates',
   '/settings': 'menu.settings',
   '/xray': 'menu.xray',
   '/outbound': 'menu.outbounds',

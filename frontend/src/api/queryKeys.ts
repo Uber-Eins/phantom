@@ -19,6 +19,11 @@ export const keys = {
     onlines: () => ['clients', 'onlines'] as const,
     lastOnline: () => ['clients', 'lastOnline'] as const,
   },
+  certificates: {
+    root: () => ['certificates'] as const,
+    list: () => ['certificates', 'list'] as const,
+    config: () => ['certificates', 'config'] as const,
+  },
   xray: {
     root: () => ['xray'] as const,
     config: () => ['xray', 'config'] as const,

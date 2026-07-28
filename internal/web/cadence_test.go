@@ -21,6 +21,7 @@ func TestJobCadencesAreValidCronSpecs(t *testing.T) {
 		"cadenceMtproto":      cadenceMtproto,
 		"cadenceOutboundSub":  cadenceOutboundSub,
 		"cadenceXrayLogPrune": cadenceXrayLogPrune,
+		"cadenceACMERenewal":  cadenceACMERenewal,
 	}
 	for name, spec := range cadences {
 		if _, err := cron.ParseStandard(spec); err != nil {

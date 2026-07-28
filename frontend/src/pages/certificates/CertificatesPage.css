@@ -1,0 +1,81 @@
+.certificate-form-modal .certificate-form {
+  max-height: min(72vh, 720px);
+  overflow-y: auto;
+  padding-inline: 1px;
+}
+
+.certificate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 20px 0 4px;
+}
+
+.certificate-config-panel {
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg, 8px);
+}
+
+.certificate-identifiers {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.certificates-page .card-empty {
+  display: flex;
+  min-height: 120px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.certificate-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.certificate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg, 8px);
+  background: var(--ant-color-bg-container);
+}
+
+.certificate-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.certificate-card-id {
+  color: var(--ant-color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.certificate-card-dates {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  color: var(--ant-color-text-secondary);
+}
+
+@media (max-width: 768px) {
+  .certificates-page .content-area {
+    padding: 8px;
+  }
+
+  .certificates-page .ant-card-head-title {
+    padding-left: 28px;
+  }
+
+  .certificate-form-modal .certificate-form {
+    max-height: none;
+  }
+}
