@@ -171,8 +171,13 @@ exports[`FinalMaskStreamSettingsSchema fixtures > parses tcp-mask byte-stably 1`
       "settings": {
         "hostname": "mc.example.com",
         "password": "s3cr3t",
-        "usernames": [
-          "Dream",
+        "profiles": [
+          {
+            "texturesSignature": "Zm9yLWZpeHR1cmUtdXNlLW9ubHktbm90LWEtcmVhbC1tb2phbmctc2lnbmF0dXJl",
+            "texturesValue": "eyJ0aW1lc3RhbXAiOjE3MDAwMDAwMDAwMDAsInByb2ZpbGVJZCI6ImVjNzBiY2FmNzAyZjRiYjhiNDhkMjc2ZmE1MmE3ODBjIn0=",
+            "username": "Dream",
+            "uuid": "ec70bcaf-702f-4bb8-b48d-276fa52a780c",
+          },
         ],
       },
       "type": "xmc",

@@ -8,6 +8,11 @@ import type { NamePath } from 'antd/es/form/interface';
 import { RandomUtil } from '@/utils';
 import { activateOnKey } from '@/utils/a11y';
 import { OutboundProtocols, UTLS_FINGERPRINT } from '@/schemas/primitives';
+import {
+  defaultXmcProfile,
+  migrateXmcSettings,
+  XmcProfilesList,
+} from './XmcProfilesForm';
 
 const UTLS_FINGERPRINT_OPTIONS = Object.values(UTLS_FINGERPRINT).map((value) => ({ value, label: value }));
 
@@ -82,7 +87,11 @@ function defaultTcpMaskSettings(type: string): Record<string, unknown> {
     case 'header-custom':
       return { clients: [], servers: [] };
     case 'xmc':
-      return { hostname: '', usernames: [], password: RandomUtil.randomLowerAndNum(16) };
+      return {
+        hostname: '',
+        profiles: [defaultXmcProfile()],
+        password: RandomUtil.randomLowerAndNum(16),
+      };
     default:
       return {};
   }
@@ -171,8 +180,8 @@ function defaultUdpHop(): Record<string, unknown> {
 export default function FinalMaskForm({ name, network, protocol, form, showAll = false }: FinalMaskFormProps) {
   const base = asPath(name);
 
-  // Migrate legacy single-range fragment masks to the per-segment arrays once
-  // on mount so configs saved before #6334 render in the list UI.
+  // Migrate legacy TCP mask shapes once on mount so configs saved before
+  // #6334 (fragment ranges) and #6487 (XMC profiles) render in the list UI.
   const migratedRef = useRef(false);
   useEffect(() => {
     if (migratedRef.current) return;
@@ -183,8 +192,12 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
     const next = tcp.map((mask) => {
       if (!mask || typeof mask !== 'object') return mask;
       const m = mask as Record<string, unknown>;
-      if (m.type !== 'fragment' || !m.settings || typeof m.settings !== 'object') return mask;
-      const { next: migrated, changed } = migrateFragmentSettings(m.settings as Record<string, unknown>);
+      if (m.type !== 'fragment' && m.type !== 'xmc') return mask;
+      if (!m.settings || typeof m.settings !== 'object') return mask;
+      const settings = m.settings as Record<string, unknown>;
+      const { next: migrated, changed } = m.type === 'fragment'
+        ? migrateFragmentSettings(settings)
+        : migrateXmcSettings(settings);
       if (!changed) return mask;
       anyChanged = true;
       return { ...m, settings: migrated };
@@ -380,13 +393,7 @@ function TcpMaskItem({
                 <Form.Item label="Hostname" name={[fieldName, 'settings', 'hostname']}>
                   <Input placeholder="Server address mimicked in the handshake" />
                 </Form.Item>
-                <Form.Item
-                  label="Usernames"
-                  name={[fieldName, 'settings', 'usernames']}
-                  extra="Player names offered to probes; core defaults to Dream when empty."
-                >
-                  <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
-                </Form.Item>
+                <XmcProfilesList tcpFieldName={fieldName} />
                 <Form.Item label="Password" required>
                   <Space.Compact block>
                     <Form.Item

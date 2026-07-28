@@ -551,6 +551,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	if err := validateFinalMaskRealityCombo(inbound.StreamSettings); err != nil {
 		return inbound, false, err
 	}
+	if err := validateFinalMaskXmcProfiles(inbound.StreamSettings); err != nil {
+		return inbound, false, err
+	}
 	s.normalizeMtprotoSecret(inbound)
 	if err := s.normalizeMtprotoXrayPort(inbound, ""); err != nil {
 		return inbound, false, err
@@ -922,6 +925,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	// Normalize streamSettings based on protocol
 	s.normalizeStreamSettings(inbound)
 	if err := validateFinalMaskRealityCombo(inbound.StreamSettings); err != nil {
+		return inbound, false, err
+	}
+	if err := validateFinalMaskXmcProfiles(inbound.StreamSettings); err != nil {
 		return inbound, false, err
 	}
 	s.normalizeMtprotoSecret(inbound)

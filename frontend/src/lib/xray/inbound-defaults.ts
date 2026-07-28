@@ -164,11 +164,9 @@ export function createDefaultShadowsocksInboundSettings(
   };
 }
 
-// Hysteria v1 defaults still emit `version: 2` to match the legacy panel
-// constructor — the field discriminates v1 vs v2 inside the same settings
-// shape. Callers that explicitly want v1 pass `{ version: 1 }`.
+// Current xray-core builds Hysteria v2 only.
 export interface HysteriaInboundSeed {
-  version?: number;
+  version?: 2;
 }
 
 export function createDefaultHysteriaInboundSettings(

@@ -30,8 +30,15 @@
       "type": "xmc",
       "settings": {
         "hostname": "mc.example.com",
-        "usernames": ["Dream"],
-        "password": "s3cr3t"
+        "password": "s3cr3t",
+        "profiles": [
+          {
+            "username": "Dream",
+            "uuid": "ec70bcaf-702f-4bb8-b48d-276fa52a780c",
+            "texturesValue": "eyJ0aW1lc3RhbXAiOjE3MDAwMDAwMDAwMDAsInByb2ZpbGVJZCI6ImVjNzBiY2FmNzAyZjRiYjhiNDhkMjc2ZmE1MmE3ODBjIn0=",
+            "texturesSignature": "Zm9yLWZpeHR1cmUtdXNlLW9ubHktbm90LWEtcmVhbC1tb2phbmctc2lnbmF0dXJl"
+          }
+        ]
       }
     }
   ]

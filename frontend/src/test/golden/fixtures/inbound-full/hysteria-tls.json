@@ -3,12 +3,12 @@
   "up": 0,
   "down": 0,
   "total": 0,
-  "remark": "gina-hysteria-v1",
+  "remark": "gina-hysteria",
   "enable": true,
   "expiryTime": 0,
   "listen": "",
   "port": 36715,
-  "tag": "inbound-hysteria-v1",
+  "tag": "inbound-hysteria",
   "sniffing": {
     "enabled": false,
     "destOverride": ["http", "tls", "quic", "fakedns"],
@@ -19,7 +19,7 @@
   },
   "protocol": "hysteria",
   "settings": {
-    "version": 1,
+    "version": 2,
     "clients": [
       {
         "auth": "hyst-v1-auth-XYZ",

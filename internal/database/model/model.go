@@ -247,10 +247,19 @@ func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {
 		if converted, ok := WireguardClientsToPeers(settings); ok {
 			settings = converted
 		}
+	case Hysteria:
+		if healed, ok := HealHysteriaVersion(settings); ok {
+			settings = healed
+		}
 	}
 	streamSettings := i.StreamSettings
 	if stripped, ok := StripInboundXhttpClientFields(streamSettings); ok {
 		streamSettings = stripped
+	}
+	if i.Protocol == Hysteria {
+		if healed, ok := HealHysteriaStreamVersion(streamSettings); ok {
+			streamSettings = healed
+		}
 	}
 	return &xray.InboundConfig{
 		Listen:         json_util.RawMessage(listen),

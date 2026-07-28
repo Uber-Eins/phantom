@@ -37,8 +37,8 @@ RUN apk add --no-cache ca-certificates curl tar tzdata unzip
 WORKDIR /assets
 
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 30 -o xray.zip \
-      https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-linux-64.zip \
-    && echo "aa11c3685c71da0ffc71e511db50404609e7e963bb914b048f59a6a00af8930e  xray.zip" | sha256sum -c - \
+      https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip \
+    && echo "8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40  xray.zip" | sha256sum -c - \
     && unzip -q xray.zip xray \
     && install -Dm755 xray /out/bin/xray-linux-amd64
 
