@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/acmecert"
-	"github.com/mhsanaei/3x-ui/v3/internal/database"
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/acmecert"
+	"github.com/Uber-Eins/phantom/v3/internal/database"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 )
 
 type fakeCertificateIssuer struct {

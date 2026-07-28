@@ -8,8 +8,8 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	wgutil "github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	wgutil "github.com/Uber-Eins/phantom/v3/internal/util/wireguard"
 )
 
 const testClientID = "11111111-2222-4333-8444-555555555555"

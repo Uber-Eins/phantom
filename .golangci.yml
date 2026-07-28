@@ -41,7 +41,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/mhsanaei/3x-ui
+        - github.com/Uber-Eins/phantom
   exclusions:
     paths:
       - frontend

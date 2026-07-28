@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/config"
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/nginxfront"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/config"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/nginxfront"
+	"github.com/Uber-Eins/phantom/v3/internal/util/json_util"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 
 	"go.uber.org/atomic"
 )

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/mtproto"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 )
 
 type LocalDeps struct {

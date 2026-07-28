@@ -7,8 +7,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 )
 
 // AutoMigrate must create the client traffic hot-path indexes.

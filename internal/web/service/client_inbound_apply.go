@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database"
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/random"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/database"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/util/common"
+	"github.com/Uber-Eins/phantom/v3/internal/util/random"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 
 	"gorm.io/gorm"
 )

@@ -6,9 +6,9 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database"
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
+	"github.com/Uber-Eins/phantom/v3/internal/database"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/web/service"
 )
 
 // LinkService generates authenticated connection links for local inbounds.

@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/web/global"
 )
 
 // PanelService provides process-level panel controls.

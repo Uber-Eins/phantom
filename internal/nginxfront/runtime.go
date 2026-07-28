@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 )
 
 func H1FallbackSocket() string {

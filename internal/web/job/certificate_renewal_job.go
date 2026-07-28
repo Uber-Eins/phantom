@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/web/service"
 )
 
 type CertificateRenewalJob struct {

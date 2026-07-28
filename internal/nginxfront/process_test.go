@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
 )
 
 func TestWriteNginxLogNormalizesNativeLine(t *testing.T) {

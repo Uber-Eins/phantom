@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 )
 
 const (

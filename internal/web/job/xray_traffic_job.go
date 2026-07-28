@@ -1,11 +1,11 @@
 package job
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/outbound"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/web/service"
+	"github.com/Uber-Eins/phantom/v3/internal/web/service/outbound"
+	"github.com/Uber-Eins/phantom/v3/internal/web/websocket"
+	"github.com/Uber-Eins/phantom/v3/internal/xray"
 )
 
 // XrayTrafficJob collects local Xray traffic and updates the panel database.

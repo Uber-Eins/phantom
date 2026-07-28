@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
+	"github.com/Uber-Eins/phantom/v3/internal/util/json_util"
 )
 
 // ---------------------------------------------------------------------------

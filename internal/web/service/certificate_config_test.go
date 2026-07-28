@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/acmecert"
+	"github.com/Uber-Eins/phantom/v3/internal/acmecert"
 )
 
 func TestCertificateConfigDefaultsAndPersistence(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/Uber-Eins/phantom/v3/internal/logger"
 )
 
 type xrayMetricsState struct {
