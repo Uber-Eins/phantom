@@ -22,10 +22,14 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install Podman
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get install -y podman nginx libnginx-mod-stream
+          sudo install -d /etc/nginx/modules
+          sudo install -m 0644 \
+            /usr/share/nginx/modules-available/mod-stream.conf \
+            /etc/nginx/modules/50-mod-stream.conf
       - name: Install frontend dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: frontend
