@@ -449,8 +449,9 @@ func (s *Server) start(restartXray bool) (err error) {
 		Handler:           engine,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// ACME DNS validation may legitimately take up to ten minutes.
+		WriteTimeout: 11 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

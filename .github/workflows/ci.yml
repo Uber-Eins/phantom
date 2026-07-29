@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   verify:
@@ -41,3 +42,15 @@ jobs:
         run: make verify
       - name: Build linux/amd64 OCI image
         run: make image
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Publish dev image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ghcr.io/uber-eins/phantom
+        run: |
+          podman tag localhost/phantom:verify "$IMAGE:dev"
+          podman push "$IMAGE:dev"
