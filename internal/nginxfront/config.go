@@ -209,15 +209,28 @@ func writeTransportLocation(out *strings.Builder, item route) {
 		out.WriteString("            proxy_set_header X-Real-IP $proxy_protocol_addr;\n")
 		out.WriteString("            proxy_set_header X-Forwarded-For $proxy_protocol_addr;\n")
 		out.WriteString("        }\n")
+	case "xhttp":
+		path := strings.TrimRight(item.Path, "/")
+		if path == "" {
+			path = "/"
+		}
+		writeHTTPProxyLocation(out, "=", path, upstream)
+		if path != "/" {
+			writeHTTPProxyLocation(out, "^~", path+"/", upstream)
+		}
 	default:
-		fmt.Fprintf(out, "        location = %s {\n", nginxQuote(item.Path))
-		fmt.Fprintf(out, "            proxy_pass http://%s;\n", upstream)
-		out.WriteString("            proxy_http_version 1.1;\n")
-		out.WriteString("            proxy_set_header Host $host;\n")
-		out.WriteString("            proxy_set_header X-Real-IP $proxy_protocol_addr;\n")
-		out.WriteString("            proxy_set_header X-Forwarded-For $proxy_protocol_addr;\n")
-		out.WriteString("        }\n")
+		writeHTTPProxyLocation(out, "=", item.Path, upstream)
 	}
+}
+
+func writeHTTPProxyLocation(out *strings.Builder, modifier, path, upstream string) {
+	fmt.Fprintf(out, "        location %s %s {\n", modifier, nginxQuote(path))
+	fmt.Fprintf(out, "            proxy_pass http://%s;\n", upstream)
+	out.WriteString("            proxy_http_version 1.1;\n")
+	out.WriteString("            proxy_set_header Host $host;\n")
+	out.WriteString("            proxy_set_header X-Real-IP $proxy_protocol_addr;\n")
+	out.WriteString("            proxy_set_header X-Forwarded-For $proxy_protocol_addr;\n")
+	out.WriteString("        }\n")
 }
 
 func writeFallbackServers(out *strings.Builder, routes []route) {

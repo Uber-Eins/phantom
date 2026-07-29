@@ -25,6 +25,7 @@ func TestRenderConfigBuildsDualStackSNIAndPathRoutes(t *testing.T) {
 		testTLSRoute(1, TemplateVlessWSTLS, "shared.example.com", "/ws", "ws", certFile, keyFile),
 		testTLSRoute(2, TemplateVlessGRPCTLS, "shared.example.com", "/rpc", "grpc", certFile, keyFile),
 		testTLSRoute(3, TemplateVlessTCPTLS, "tcp.example.com", "", "tcp", certFile, keyFile),
+		testTLSRoute(4, TemplateVlessXHTTPTLS, "xhttp.example.com", "/xhttp", "xhttp", certFile, keyFile),
 	}
 
 	rendered, err := renderConfig(routes)
@@ -37,6 +38,8 @@ func TestRenderConfigBuildsDualStackSNIAndPathRoutes(t *testing.T) {
 		"ssl_preread on;",
 		"location = \"/ws\"",
 		"location ^~ \"/rpc/\"",
+		"location = \"/xhttp\"",
+		"location ^~ \"/xhttp/\"",
 		"grpc_pass grpc://xray_2;",
 		"proxy_protocol on;",
 		nginxQuote("unix:"+H1FallbackSocket()) + " proxy_protocol default_server",
