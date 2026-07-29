@@ -12,7 +12,6 @@ import (
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 	"github.com/Uber-Eins/phantom/v3/internal/logger"
 	"github.com/Uber-Eins/phantom/v3/internal/util/common"
-	"github.com/Uber-Eins/phantom/v3/internal/util/random"
 	"github.com/Uber-Eins/phantom/v3/internal/xray"
 
 	"gorm.io/gorm"
@@ -207,14 +206,14 @@ func (s *ClientService) checkEmailsExistForClients(inboundSvc *InboundService, c
 		}
 		key := strings.ToLower(client.Email)
 		if prev, ok := seen[key]; ok {
-			if prev != client.SubID || client.SubID == "" {
+			if prev != "" && client.SubID != "" && prev != client.SubID {
 				return client.Email, nil
 			}
 			continue
 		}
 		seen[key] = client.SubID
 		if existingSub, ok := emailSubIDs[key]; ok {
-			if client.SubID == "" || existingSub == "" || existingSub != client.SubID {
+			if client.SubID != "" && existingSub != "" && existingSub != client.SubID {
 				return client.Email, nil
 			}
 		}
@@ -252,10 +251,6 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 				cm["created_at"] = nowTs
 			}
 			cm["updated_at"] = nowTs
-			existingSub, _ := cm["subId"].(string)
-			if strings.TrimSpace(existingSub) == "" {
-				cm["subId"] = random.NumLower(16)
-			}
 			interfaceClients[i] = cm
 		}
 	}
@@ -277,10 +272,10 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 		return false, err
 	}
 
-	// A client already on this inbound is skipped instead of appended again:
-	// checkEmailsExistForClients exempts a matching subId so one identity can
-	// live on several inbounds, which let retried or raced adds duplicate the
-	// same email inside a single settings array (#5770). clients and
+	// A client already on this inbound is skipped instead of appended again.
+	// The same email identity can live on several inbounds, which otherwise lets
+	// retried or raced adds duplicate that email inside one settings array
+	// (#5770). clients and
 	// interfaceClients are parsed from the same data.Settings array, so they
 	// stay index-aligned while filtering.
 	if len(existingClients) > 0 && len(clients) > 0 {
@@ -599,7 +594,7 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 				if strings.TrimSpace(preservedSubID) != "" {
 					newMap["subId"] = preservedSubID
 				} else {
-					newMap["subId"] = random.NumLower(16)
+					delete(newMap, "subId")
 				}
 			}
 			if v, ok2 := newMap["subId"].(string); ok2 {

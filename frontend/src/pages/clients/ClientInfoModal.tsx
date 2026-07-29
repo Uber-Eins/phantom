@@ -140,15 +140,6 @@ export default function ClientInfoModal({
                       : <Tag color="red">{t('none')}</Tag>}
                   </td>
                 </tr>
-                <tr>
-                  <td>{t('pages.clients.subId')}</td>
-                  <td>
-                    <Tag className="info-large-tag">{client.subId || '-'}</Tag>
-                    {client.subId && (
-                      <Button size="small" type="text" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(client.subId!)} />
-                    )}
-                  </td>
-                </tr>
                 {client.uuid && (
                   <tr>
                     <td>{t('pages.clients.uuid')}</td>

@@ -1,16 +1,21 @@
 import { z } from 'zod';
 
-export const CertificateIssueRequestSchema = z.object({
+const CertificateRequestBaseSchema = z.object({
   remark: z.string().trim().min(1, 'pages.certificates.validation.remarkRequired').max(120),
   addMethod: z.literal('acme'),
   ca: z.enum(['zerossl', 'letsencrypt']),
   validationMethod: z.literal('cloudflare'),
-  cloudflareToken: z.string().trim().min(1, 'pages.certificates.validation.tokenRequired').max(4096),
+  cloudflareToken: z.string().trim().max(4096),
   identifiers: z.string().trim().min(1, 'pages.certificates.validation.identifiersRequired').max(16384),
   email: z.string().trim().email('pages.certificates.validation.emailInvalid').max(254),
   keyType: z.enum(['EC256', 'EC384', 'RSA2048', 'RSA4096']),
   certificateType: z.enum(['domain', 'ip']),
-}).superRefine((value, context) => {
+});
+
+function rejectUnsupportedIP(
+  value: z.infer<typeof CertificateRequestBaseSchema>,
+  context: z.RefinementCtx,
+) {
   if (value.certificateType === 'ip') {
     context.addIssue({
       code: 'custom',
@@ -18,7 +23,14 @@ export const CertificateIssueRequestSchema = z.object({
       message: 'pages.certificates.validation.ipCloudflareUnsupported',
     });
   }
-});
+}
+
+export const CertificateIssueRequestSchema = CertificateRequestBaseSchema.extend({
+  cloudflareToken: z.string().trim().min(1, 'pages.certificates.validation.tokenRequired').max(4096),
+}).superRefine(rejectUnsupportedIP);
+
+export const CertificateUpdateRequestSchema = CertificateRequestBaseSchema
+  .superRefine(rejectUnsupportedIP);
 
 export const CertificateRecordSchema = z.object({
   id: z.number().int().positive(),
@@ -27,6 +39,7 @@ export const CertificateRecordSchema = z.object({
   ca: z.enum(['zerossl', 'letsencrypt']),
   validationMethod: z.literal('cloudflare'),
   identifiers: z.string(),
+  certificateIdentifiers: z.string(),
   email: z.string(),
   keyType: z.enum(['EC256', 'EC384', 'RSA2048', 'RSA4096']),
   certificateType: z.enum(['domain', 'ip']),
@@ -51,5 +64,6 @@ export const CertificateConfigSchema = z.object({
 });
 
 export type CertificateIssueRequest = z.infer<typeof CertificateIssueRequestSchema>;
+export type CertificateUpdateRequest = z.infer<typeof CertificateUpdateRequestSchema>;
 export type CertificateRecord = z.infer<typeof CertificateRecordSchema>;
 export type CertificateConfig = z.infer<typeof CertificateConfigSchema>;

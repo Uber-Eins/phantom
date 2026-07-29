@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useFormContext } from 'react-hook-form';
 import {
   Alert,
   Button,
@@ -12,8 +13,12 @@ import {
 import { RadarChartOutlined, SearchOutlined } from '@ant-design/icons';
 
 import { FormField } from '@/components/form/rhf';
-import { validateRealityTarget } from '@/lib/xray/stream-wire-normalize';
+import {
+  realityTargetServerName,
+  validateRealityTarget,
+} from '@/lib/xray/stream-wire-normalize';
 import type { RealityScanResult } from '@/models/reality-scan';
+import type { InboundFormValues } from '@/schemas/forms/inbound-form';
 
 import RealityTargetScannerModal from './RealityTargetScannerModal';
 
@@ -23,6 +28,7 @@ export interface RealityTargetFieldsProps {
   scanRealityTarget: () => void;
   scanRealityCandidates: (targets?: string) => Promise<RealityScanResult[]>;
   applyRealityScanResult: (result: RealityScanResult) => void;
+  syncServerName?: boolean;
 }
 
 export default function RealityTargetFields({
@@ -31,9 +37,11 @@ export default function RealityTargetFields({
   scanRealityTarget,
   scanRealityCandidates,
   applyRealityScanResult,
+  syncServerName = false,
 }: RealityTargetFieldsProps) {
   const { t } = useTranslation();
   const [scannerOpen, setScannerOpen] = useState(false);
+  const { setValue } = useFormContext<InboundFormValues>();
 
   return (
     <>
@@ -50,6 +58,18 @@ export default function RealityTargetFields({
                 const errKey = validateRealityTarget(typeof value === 'string' ? value : '');
                 return errKey ? errKey : true;
               },
+            }}
+            onAfterChange={(value) => {
+              const serverName = realityTargetServerName(
+                typeof value === 'string' ? value : '',
+              );
+              if (syncServerName && serverName) {
+                setValue(
+                  'streamSettings.realitySettings.serverNames',
+                  [serverName],
+                  { shouldDirty: true, shouldValidate: true },
+                );
+              }
             }}
           >
             <Input style={{ flex: 1 }} placeholder="example.com:443" />

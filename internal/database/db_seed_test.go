@@ -3,7 +3,6 @@ package database
 import (
 	"encoding/json"
 	"path/filepath"
-	"regexp"
 	"testing"
 
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
@@ -71,7 +70,7 @@ func TestSeedClientsFromInboundJSON_IsIdempotentAgainstExistingClients(t *testin
 	}
 }
 
-func TestNormalizeInboundClientSubId_FillsMissingAndPreservesExisting(t *testing.T) {
+func TestRunSeeders_DoesNotCreateInboundClientSubIds(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
 	if err := InitDB(filepath.Join(dbDir, "x-ui.db")); err != nil {
@@ -111,12 +110,8 @@ func TestNormalizeInboundClientSubId_FillsMissingAndPreservesExisting(t *testing
 		t.Fatalf("seed inbound: %v", err)
 	}
 
-	if err := db.Where("seeder_name = ?", "InboundClientSubIdFix").Delete(&model.HistoryOfSeeders{}).Error; err != nil {
-		t.Fatalf("clear seeder history: %v", err)
-	}
-
-	if err := normalizeInboundClientSubId(); err != nil {
-		t.Fatalf("normalizeInboundClientSubId: %v", err)
+	if err := runSeeders(false); err != nil {
+		t.Fatalf("runSeeders: %v", err)
 	}
 
 	var reloaded model.Inbound
@@ -132,13 +127,12 @@ func TestNormalizeInboundClientSubId_FillsMissingAndPreservesExisting(t *testing
 		t.Fatalf("expected 3 clients, got %v", parsed["clients"])
 	}
 
-	subIdPattern := regexp.MustCompile(`^[0-9a-z]{16}$`)
-	for i := range 2 {
-		obj := clients[i].(map[string]any)
-		sub, _ := obj["subId"].(string)
-		if !subIdPattern.MatchString(sub) {
-			t.Fatalf("client %d: expected 16-char [0-9a-z] subId, got %q", i, sub)
-		}
+	first := clients[0].(map[string]any)
+	if sub, _ := first["subId"].(string); sub != "" {
+		t.Fatalf("empty legacy subId was changed to %q", sub)
+	}
+	if _, exists := clients[1].(map[string]any)["subId"]; exists {
+		t.Fatal("missing legacy subId was created")
 	}
 	preserved := clients[2].(map[string]any)["subId"].(string)
 	if preserved != "keep-me-1234" {
@@ -149,8 +143,8 @@ func TestNormalizeInboundClientSubId_FillsMissingAndPreservesExisting(t *testing
 	if err := db.Model(&model.HistoryOfSeeders{}).Where("seeder_name = ?", "InboundClientSubIdFix").Count(&historyCount).Error; err != nil {
 		t.Fatalf("count seeder history: %v", err)
 	}
-	if historyCount != 1 {
-		t.Fatalf("expected one InboundClientSubIdFix history row, got %d", historyCount)
+	if historyCount != 0 {
+		t.Fatalf("unexpected InboundClientSubIdFix history row count: %d", historyCount)
 	}
 }
 

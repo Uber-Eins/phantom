@@ -10,7 +10,7 @@ export const VmessClientSchema = z.object({
   totalGB: z.number().int().min(0).default(0),
   expiryTime: z.number().int().default(0),
   enable: z.boolean().default(true),
-  subId: z.string().default(''),
+  subId: z.string().optional(),
   comment: z.string().default(''),
   reset: z.number().int().min(0).default(0),
   created_at: z.number().int().optional(),

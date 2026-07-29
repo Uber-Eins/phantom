@@ -457,7 +457,6 @@ export function useClients() {
     if (!base) return null;
     const payload: Record<string, unknown> = {
       email: base.email,
-      subId: base.subId,
       id: base.uuid,
       password: base.password,
       auth: base.auth,

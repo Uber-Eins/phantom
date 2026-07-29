@@ -14,7 +14,7 @@ import type { WireguardInboundSettings } from '@/schemas/protocols/inbound/wireg
 
 // Plain-object factories for protocol clients. Each returns a Zod-parsable
 // object matching the wire shape. Random fields (id, password, auth,
-// email, subId) call RandomUtil at invocation time — pass them in
+// email) call RandomUtil at invocation time — pass them in
 // `overrides` for deterministic tests or for forms that pre-seed values.
 //
 // These replace the legacy `new Inbound.<Settings>.<Client>()` constructors
@@ -23,7 +23,6 @@ import type { WireguardInboundSettings } from '@/schemas/protocols/inbound/wireg
 
 interface ClientBaseSeed {
   email?: string;
-  subId?: string;
   totalGB?: number;
   expiryTime?: number;
   enable?: boolean;
@@ -36,7 +35,6 @@ interface ClientBase {
   totalGB: number;
   expiryTime: number;
   enable: boolean;
-  subId: string;
   comment: string;
   reset: number;
 }
@@ -47,7 +45,6 @@ function clientBase(seed: ClientBaseSeed = {}): ClientBase {
     totalGB: seed.totalGB ?? 0,
     expiryTime: seed.expiryTime ?? 0,
     enable: seed.enable ?? true,
-    subId: seed.subId ?? RandomUtil.randomLowerAndNum(16),
     comment: seed.comment ?? '',
     reset: seed.reset ?? 0,
   };

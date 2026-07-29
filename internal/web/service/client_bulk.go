@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/Uber-Eins/phantom/v3/internal/database"
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 	"github.com/Uber-Eins/phantom/v3/internal/logger"
@@ -26,7 +24,7 @@ type BulkAttachResult struct {
 }
 
 // BulkAttach attaches the given existing clients (by email) to each target inbound,
-// reusing their identity (email/UUID/password/subId) and a shared traffic row. It adds
+// reusing their identity (email and protocol credentials) and a shared traffic row. It adds
 // all clients to a target in a single AddInboundClient call, and reports clients already
 // present on a target as skipped.
 func (s *ClientService) BulkAttach(inboundSvc *InboundService, emails []string, inboundIds []int) (*BulkAttachResult, bool, error) {
@@ -1086,9 +1084,6 @@ func (s *ClientService) BulkCreate(inboundSvc *InboundService, payloads []Client
 		}
 
 		client.Email = email
-		if client.SubID == "" {
-			client.SubID = uuid.NewString()
-		}
 		if !client.Enable {
 			client.Enable = true
 		}
@@ -1103,16 +1098,20 @@ func (s *ClientService) BulkCreate(inboundSvc *InboundService, payloads []Client
 			skip(email, "email already in use: "+email)
 			continue
 		}
-		if owner, ok := seenSubID[client.SubID]; ok && owner != le {
-			skip(email, "subId already in use: "+client.SubID)
-			continue
+		if client.SubID != "" {
+			if owner, ok := seenSubID[client.SubID]; ok && owner != le {
+				skip(email, "subId already in use: "+client.SubID)
+				continue
+			}
+			seenSubID[client.SubID] = le
 		}
 		seenEmail[le] = struct{}{}
-		seenSubID[client.SubID] = le
 
 		prep = append(prep, prepared{client: client, inboundIds: payloads[i].InboundIds})
 		emails = append(emails, email)
-		subIDs = append(subIDs, client.SubID)
+		if client.SubID != "" {
+			subIDs = append(subIDs, client.SubID)
+		}
 	}
 
 	if len(prep) == 0 {
@@ -1166,11 +1165,13 @@ func (s *ClientService) BulkCreate(inboundSvc *InboundService, payloads []Client
 	for idx := range prep {
 		le := strings.ToLower(prep[idx].client.Email)
 		if rec, ok := existingByEmail[le]; ok {
-			if rec.SubID != prep[idx].client.SubID {
+			if rec.SubID != "" && prep[idx].client.SubID != "" &&
+				rec.SubID != prep[idx].client.SubID {
 				failed[idx] = true
 				reason[idx] = "email already in use: " + prep[idx].client.Email
 				continue
 			}
+			prep[idx].client.SubID = rec.SubID
 			if prep[idx].client.ID == "" {
 				prep[idx].client.ID = rec.UUID
 			}
@@ -1184,10 +1185,12 @@ func (s *ClientService) BulkCreate(inboundSvc *InboundService, payloads []Client
 				prep[idx].client.Secret = rec.Secret
 			}
 		}
-		if owner, ok := existingSubOwner[prep[idx].client.SubID]; ok && owner != le {
-			failed[idx] = true
-			reason[idx] = "subId already in use: " + prep[idx].client.SubID
-			continue
+		if prep[idx].client.SubID != "" {
+			if owner, ok := existingSubOwner[prep[idx].client.SubID]; ok && owner != le {
+				failed[idx] = true
+				reason[idx] = "subId already in use: " + prep[idx].client.SubID
+				continue
+			}
 		}
 
 		ok := true

@@ -7,6 +7,7 @@ import {
   normalizeSockoptForWire,
   normalizeStreamSettingsForWire,
   normalizeXhttpForWire,
+  realityTargetServerName,
   validateRealityClientVer,
   validateRealityMaxClientVer,
   validateRealityTarget,
@@ -25,6 +26,18 @@ describe('validateRealityTarget', () => {
   it('rejects host without port', () => {
     expect(validateRealityTarget('play.google.com')).toBe('pages.inbounds.form.realityTargetNeedsPort');
     expect(validateRealityTarget('')).toBe('pages.inbounds.form.realityTargetRequired');
+  });
+});
+
+describe('realityTargetServerName', () => {
+  it('extracts a normalized DNS host for the guided Nginx SNI route', () => {
+    expect(realityTargetServerName(' New.Example.COM:443 ')).toBe('new.example.com');
+  });
+
+  it('does not turn bare ports or IP targets into an SNI', () => {
+    expect(realityTargetServerName('443')).toBeUndefined();
+    expect(realityTargetServerName('203.0.113.8:443')).toBeUndefined();
+    expect(realityTargetServerName('[2001:db8::1]:443')).toBeUndefined();
   });
 });
 

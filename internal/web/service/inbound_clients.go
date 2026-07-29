@@ -171,27 +171,6 @@ func (s *InboundService) emailsUsedByOtherInbounds(emails []string, exceptInboun
 	return shared, nil
 }
 
-func (s *InboundService) writeBackClientSubID(sourceInboundID int, client model.Client, subID string) (bool, error) {
-	client.SubID = subID
-	client.UpdatedAt = time.Now().UnixMilli()
-	if client.Email == "" {
-		return false, common.NewError("empty client email")
-	}
-
-	settingsBytes, err := json.Marshal(map[string][]model.Client{
-		"clients": {client},
-	})
-	if err != nil {
-		return false, err
-	}
-
-	updatePayload := &model.Inbound{
-		Id:       sourceInboundID,
-		Settings: string(settingsBytes),
-	}
-	return s.clientService.UpdateInboundClient(s, updatePayload, client.Email)
-}
-
 func (s *InboundService) generateRandomCredential(targetProtocol model.Protocol) string {
 	switch targetProtocol {
 	case model.VMESS, model.VLESS:
@@ -213,6 +192,7 @@ func (s *InboundService) buildTargetClientFromSource(source model.Client, target
 	target.Auth = ""
 	target.Flow = ""
 	target.Secret = ""
+	target.SubID = ""
 
 	targetProtocol := targetInbound.Protocol
 	switch targetProtocol {
@@ -308,19 +288,6 @@ func (s *InboundService) CopyInboundClients(targetInboundID int, sourceInboundID
 			if _, ok := allowedEmails[strings.ToLower(originalEmail)]; !ok {
 				continue
 			}
-		}
-
-		if sourceClient.SubID == "" {
-			newSubID := uuid.NewString()
-			subNeedRestart, subErr := s.writeBackClientSubID(sourceInbound.Id, sourceClient, newSubID)
-			if subErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: failed to write source subId: %v", originalEmail, subErr))
-				continue
-			}
-			if subNeedRestart {
-				needRestart = true
-			}
-			sourceClient.SubID = newSubID
 		}
 
 		targetEmail := s.nextAvailableCopiedEmail(originalEmail, targetInboundID, occupiedEmails)

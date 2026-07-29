@@ -60,9 +60,6 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		return false, common.NewError("at least one inbound is required")
 	}
 
-	if client.SubID == "" {
-		client.SubID = uuid.NewString()
-	}
 	if !client.Enable {
 		client.Enable = true
 	}
@@ -79,9 +76,10 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 	}
 	emailTaken := !errors.Is(err, gorm.ErrRecordNotFound)
 	if emailTaken {
-		if existing.SubID == "" || existing.SubID != client.SubID {
+		if existing.SubID != "" && client.SubID != "" && existing.SubID != client.SubID {
 			return false, common.NewError("email already in use:", client.Email)
 		}
+		client.SubID = existing.SubID
 		// Reuse stored credentials when re-adding an existing identity, or
 		// fillProtocolDefaults mints a fresh UUID that desyncs other inbounds.
 		if client.ID == "" {
@@ -342,9 +340,6 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 	}
 	if updated.SubID == "" {
 		updated.SubID = existing.SubID
-	}
-	if updated.SubID == "" {
-		updated.SubID = uuid.NewString()
 	}
 	updated.UpdatedAt = time.Now().UnixMilli()
 	if updated.CreatedAt == 0 {

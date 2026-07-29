@@ -104,6 +104,22 @@ export function validateRealityTarget(target: string): string | undefined {
   return undefined;
 }
 
+/** Returns the DNS host from a valid REALITY target so guided SNI routing can follow it. */
+export function realityTargetServerName(target: string): string | undefined {
+  const value = target.trim();
+  if (validateRealityTarget(value)) return undefined;
+
+  if (value.startsWith('[') || value.startsWith('/') || value.startsWith('@')) {
+    return undefined;
+  }
+
+  const separator = value.lastIndexOf(':');
+  if (separator <= 0) return undefined;
+  const host = value.slice(0, separator).trim().toLowerCase();
+  if (!host || /^\d+(?:\.\d+){3}$/.test(host)) return undefined;
+  return host;
+}
+
 /**
  * Parses a REALITY client-version string the way xray-core's config loader
  * does: one to three dot-separated numeric parts, each 0-255. Returns the

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,18 @@ type issueCertificateForm struct {
 	CA               string `json:"ca" form:"ca" validate:"required,oneof=zerossl letsencrypt"`
 	ValidationMethod string `json:"validationMethod" form:"validationMethod" validate:"required,oneof=cloudflare"`
 	CloudflareToken  string `json:"cloudflareToken" form:"cloudflareToken" validate:"required,max=4096"`
+	Identifiers      string `json:"identifiers" form:"identifiers" validate:"required,max=16384"`
+	Email            string `json:"email" form:"email" validate:"required,email,max=254"`
+	KeyType          string `json:"keyType" form:"keyType" validate:"required,oneof=EC256 EC384 RSA2048 RSA4096"`
+	CertificateType  string `json:"certificateType" form:"certificateType" validate:"required,oneof=domain ip"`
+}
+
+type updateCertificateForm struct {
+	Remark           string `json:"remark" form:"remark" validate:"required,max=120"`
+	AddMethod        string `json:"addMethod" form:"addMethod" validate:"required,oneof=acme"`
+	CA               string `json:"ca" form:"ca" validate:"required,oneof=zerossl letsencrypt"`
+	ValidationMethod string `json:"validationMethod" form:"validationMethod" validate:"required,oneof=cloudflare"`
+	CloudflareToken  string `json:"cloudflareToken" form:"cloudflareToken" validate:"omitempty,max=4096"`
 	Identifiers      string `json:"identifiers" form:"identifiers" validate:"required,max=16384"`
 	Email            string `json:"email" form:"email" validate:"required,email,max=254"`
 	KeyType          string `json:"keyType" form:"keyType" validate:"required,oneof=EC256 EC384 RSA2048 RSA4096"`
@@ -48,6 +61,8 @@ func (a *CertificateController) initRouter(group *gin.RouterGroup) {
 	certificates.GET("/config", a.getConfig)
 	certificates.POST("/config", a.updateConfig)
 	certificates.POST("/issue", a.issue)
+	certificates.POST("/update/:id", a.update)
+	certificates.POST("/delete/:id", a.delete)
 }
 
 func (a *CertificateController) list(c *gin.Context) {
@@ -104,4 +119,45 @@ func (a *CertificateController) issue(c *gin.Context) {
 		return
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.certificates.issueSuccess"), result, nil)
+}
+
+func (a *CertificateController) update(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	form, ok := middleware.BindAndValidate[updateCertificateForm](c)
+	if !ok {
+		return
+	}
+	result, err := a.certificateService.Update(id, acmecert.IssueRequest{
+		Remark:           form.Remark,
+		AddMethod:        form.AddMethod,
+		CA:               form.CA,
+		ValidationMethod: form.ValidationMethod,
+		CloudflareToken:  form.CloudflareToken,
+		Identifiers:      form.Identifiers,
+		Email:            form.Email,
+		KeyType:          form.KeyType,
+		CertificateType:  form.CertificateType,
+	})
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "success"), result, nil)
+}
+
+func (a *CertificateController) delete(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	if err := a.certificateService.Delete(id); err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, I18nWeb(c, "success"), nil)
 }

@@ -25,6 +25,7 @@ interface RealityFormProps {
   clearRealityKeypair: () => void;
   genMldsa65: () => void;
   clearMldsa65: () => void;
+  syncServerName?: boolean;
 }
 
 export default function RealityForm({
@@ -40,6 +41,7 @@ export default function RealityForm({
   clearRealityKeypair,
   genMldsa65,
   clearMldsa65,
+  syncServerName = false,
 }: RealityFormProps) {
   const { t } = useTranslation();
   const { getFieldState, trigger } = useFormContext();
@@ -75,6 +77,7 @@ export default function RealityForm({
         scanRealityTarget={scanRealityTarget}
         scanRealityCandidates={scanRealityCandidates}
         applyRealityScanResult={applyRealityScanResult}
+        syncServerName={syncServerName}
       />
       <FormField
         name={['streamSettings', 'realitySettings', 'maxTimediff']}

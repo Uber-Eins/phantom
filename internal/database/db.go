@@ -18,7 +18,6 @@ import (
 	"github.com/Uber-Eins/phantom/v3/internal/config"
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 	"github.com/Uber-Eins/phantom/v3/internal/util/crypto"
-	"github.com/Uber-Eins/phantom/v3/internal/util/random"
 	"github.com/Uber-Eins/phantom/v3/internal/xray"
 
 	"gorm.io/driver/sqlite"
@@ -263,9 +262,6 @@ func seedWireguardPeersToClients() error {
 				email := wireguardPeerEmail(inbound.Remark, obj, i, usedEmails)
 				usedEmails[email] = struct{}{}
 				obj["email"] = email
-				if sub, _ := obj["subId"].(string); strings.TrimSpace(sub) == "" {
-					obj["subId"] = random.NumLower(16)
-				}
 				if _, ok := obj["enable"]; !ok {
 					obj["enable"] = true
 				}
@@ -406,9 +402,8 @@ func seedMtprotoSecretsToClients() error {
 				"email":  email,
 				"secret": secret,
 				"enable": true,
-				"subId":  random.NumLower(16),
 			}
-			c := model.Client{Email: email, Secret: secret, Enable: true, SubID: obj["subId"].(string)}
+			c := model.Client{Email: email, Secret: secret, Enable: true}
 
 			incoming := c.ToRecord()
 			var row model.ClientRecord
@@ -799,7 +794,7 @@ func runSeeders(isUsersEmpty bool) error {
 	}
 
 	if empty && isUsersEmpty {
-		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "InboundClientSubIdFix", "FreedomFinalRulesReverseFix", "FreedomFinalRulesPrivateEgressBlock", "InboundRealityFinalmaskTcpStrip", "WireguardPeersToClients", "MtprotoSecretsToClients"}
+		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "FreedomFinalRulesReverseFix", "FreedomFinalRulesPrivateEgressBlock", "InboundRealityFinalmaskTcpStrip", "WireguardPeersToClients", "MtprotoSecretsToClients"}
 		for _, name := range seeders {
 			if err := db.Create(&model.HistoryOfSeeders{SeederName: name}).Error; err != nil {
 				return err
@@ -852,12 +847,6 @@ func runSeeders(isUsersEmpty bool) error {
 
 	if !slices.Contains(seedersHistory, "InboundClientsArrayFix") {
 		if err := normalizeInboundClientsArray(); err != nil {
-			return err
-		}
-	}
-
-	if !slices.Contains(seedersHistory, "InboundClientSubIdFix") {
-		if err := normalizeInboundClientSubId(); err != nil {
 			return err
 		}
 	}
@@ -935,58 +924,6 @@ func normalizeSettingPaths() error {
 		}
 	}
 	return nil
-}
-
-func normalizeInboundClientSubId() error {
-	var inbounds []model.Inbound
-	if err := db.Find(&inbounds).Error; err != nil {
-		return err
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, inbound := range inbounds {
-			if strings.TrimSpace(inbound.Settings) == "" {
-				continue
-			}
-			var settings map[string]any
-			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
-				log.Printf("InboundClientSubIdFix: skip inbound %d (invalid settings json): %v", inbound.Id, err)
-				continue
-			}
-			clients, ok := settings["clients"].([]any)
-			if !ok {
-				continue
-			}
-			mutated := false
-			for i, raw := range clients {
-				obj, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				existing, _ := obj["subId"].(string)
-				if strings.TrimSpace(existing) != "" {
-					continue
-				}
-				obj["subId"] = random.NumLower(16)
-				clients[i] = obj
-				mutated = true
-			}
-			if !mutated {
-				continue
-			}
-			settings["clients"] = clients
-			newSettings, err := json.MarshalIndent(settings, "", "  ")
-			if err != nil {
-				log.Printf("InboundClientSubIdFix: skip inbound %d (marshal failed): %v", inbound.Id, err)
-				continue
-			}
-			if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
-				Update("settings", string(newSettings)).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Create(&model.HistoryOfSeeders{SeederName: "InboundClientSubIdFix"}).Error
-	})
 }
 
 func normalizeInboundClientsArray() error {

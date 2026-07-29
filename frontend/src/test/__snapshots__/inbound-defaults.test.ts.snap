@@ -65,7 +65,6 @@ exports[`createDefaultHysteriaClient > produces a Zod-valid client 1`] = `
   "enable": true,
   "expiryTime": 0,
   "reset": 0,
-  "subId": "fixed-sub-id-1234",
   "totalGB": 0,
 }
 `;
@@ -79,7 +78,6 @@ exports[`createDefaultShadowsocksClient > produces a Zod-valid client 1`] = `
   "method": "",
   "password": "ZmFrZS1zcy1wYXNzd29yZA==",
   "reset": 0,
-  "subId": "fixed-sub-id-1234",
   "totalGB": 0,
 }
 `;
@@ -92,7 +90,6 @@ exports[`createDefaultTrojanClient > produces a Zod-valid client 1`] = `
   "expiryTime": 0,
   "password": "fixed-trojan-pw",
   "reset": 0,
-  "subId": "fixed-sub-id-1234",
   "totalGB": 0,
 }
 `;
@@ -106,7 +103,6 @@ exports[`createDefaultVlessClient > produces a Zod-valid client 1`] = `
   "flow": "",
   "id": "11111111-2222-4333-8444-555555555555",
   "reset": 0,
-  "subId": "fixed-sub-id-1234",
   "totalGB": 0,
 }
 `;
@@ -121,7 +117,6 @@ exports[`createDefaultVmessClient > produces a Zod-valid client 1`] = `
   "id": "aaaaaaaa-bbbb-4ccc-9ddd-eeeeeeeeeeee",
   "reset": 0,
   "security": "auto",
-  "subId": "fixed-sub-id-1234",
   "totalGB": 0,
 }
 `;

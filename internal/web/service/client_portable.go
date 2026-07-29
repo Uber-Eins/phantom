@@ -4,8 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/Uber-Eins/phantom/v3/internal/database"
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 	"github.com/Uber-Eins/phantom/v3/internal/xray"
@@ -127,9 +125,6 @@ func (s *ClientService) ImportClients(inboundSvc *InboundService, items []Client
 		}
 
 		client.Email = email
-		if client.SubID == "" {
-			client.SubID = uuid.NewString()
-		}
 		if client.SubID != "" {
 			var subTaken int64
 			if err := db.Model(&model.ClientRecord{}).

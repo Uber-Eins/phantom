@@ -36,6 +36,9 @@ func (s *CertificateService) List() ([]*model.Certificate, error) {
 	if err := database.GetDB().Order("id asc").Find(&certificates).Error; err != nil {
 		return nil, err
 	}
+	for _, certificate := range certificates {
+		populateCertificateIdentifiers(certificate)
+	}
 	return certificates, nil
 }
 
@@ -61,7 +64,55 @@ func (s *CertificateService) Issue(
 		cleanupIssuedFiles(result)
 		return nil, fmt.Errorf("save issued certificate: %w", err)
 	}
+	populateCertificateIdentifiers(certificate)
 	return certificate, nil
+}
+
+func (s *CertificateService) Update(
+	id int,
+	request acmecert.IssueRequest,
+) (*model.Certificate, error) {
+	var certificate model.Certificate
+	if err := database.GetDB().First(&certificate, id).Error; err != nil {
+		return nil, err
+	}
+
+	updates := map[string]any{
+		"remark":            strings.TrimSpace(request.Remark),
+		"add_method":        request.AddMethod,
+		"ca":                request.CA,
+		"validation_method": request.ValidationMethod,
+		"identifiers":       strings.TrimSpace(request.Identifiers),
+		"email":             strings.TrimSpace(request.Email),
+		"key_type":          request.KeyType,
+		"certificate_type":  request.CertificateType,
+	}
+	if token := strings.TrimSpace(request.CloudflareToken); token != "" {
+		updates["cloudflare_token"] = token
+	}
+	if err := database.GetDB().Model(&certificate).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	if err := database.GetDB().First(&certificate, id).Error; err != nil {
+		return nil, err
+	}
+	populateCertificateIdentifiers(&certificate)
+	return &certificate, nil
+}
+
+func (s *CertificateService) Delete(id int) error {
+	var certificate model.Certificate
+	if err := database.GetDB().First(&certificate, id).Error; err != nil {
+		return err
+	}
+	if err := database.GetDB().Delete(&certificate).Error; err != nil {
+		return err
+	}
+	cleanupIssuedFiles(&acmecert.IssueResult{
+		CertificateFile: certificate.CertificateFile,
+		KeyFile:         certificate.KeyFile,
+	})
+	return nil
 }
 
 func (s *CertificateService) renew(

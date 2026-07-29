@@ -37,7 +37,6 @@ import { WireguardInboundSettingsSchema } from '@/schemas/protocols/inbound/wire
 
 const seed = {
   email: 'fixture@example.test',
-  subId: 'fixed-sub-id-1234',
 };
 
 describe('createDefaultVlessClient', () => {

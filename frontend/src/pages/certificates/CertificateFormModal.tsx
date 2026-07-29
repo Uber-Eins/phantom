@@ -11,51 +11,67 @@ import {
   Typography,
 } from 'antd';
 
-import { useIssueCertificate } from '@/api/queries/useIssueCertificate';
+import {
+  useIssueCertificate,
+  useUpdateCertificate,
+} from '@/api/queries/useIssueCertificate';
 import { FormField, useZodForm } from '@/components/form/rhf';
 import { SettingListItem } from '@/components/ui';
 import {
   CertificateIssueRequestSchema,
-  type CertificateIssueRequest,
+  CertificateUpdateRequestSchema,
+  type CertificateRecord,
+  type CertificateUpdateRequest,
 } from '@/schemas/certificate';
 
 interface CertificateFormModalProps {
   open: boolean;
   defaultEmail?: string;
+  certificate: CertificateRecord | null;
   onClose: () => void;
 }
 
-function defaultValues(defaultEmail = ''): CertificateIssueRequest {
+function defaultValues(
+  defaultEmail = '',
+  certificate: CertificateRecord | null = null,
+): CertificateUpdateRequest {
   return {
-    remark: '',
+    remark: certificate?.remark ?? '',
     addMethod: 'acme',
-    ca: 'zerossl',
+    ca: certificate?.ca ?? 'zerossl',
     validationMethod: 'cloudflare',
     cloudflareToken: '',
-    identifiers: '',
-    email: defaultEmail,
-    keyType: 'RSA2048',
-    certificateType: 'domain',
+    identifiers: certificate?.identifiers ?? '',
+    email: certificate?.email ?? defaultEmail,
+    keyType: certificate?.keyType ?? 'RSA2048',
+    certificateType: certificate?.certificateType ?? 'domain',
   };
 }
 
 export default function CertificateFormModal({
   open,
   defaultEmail,
+  certificate,
   onClose,
 }: CertificateFormModalProps) {
   const { t } = useTranslation();
   const issueCertificate = useIssueCertificate();
-  const methods = useZodForm(CertificateIssueRequestSchema, {
-    defaultValues: defaultValues(defaultEmail),
+  const updateCertificate = useUpdateCertificate();
+  const schema = certificate
+    ? CertificateUpdateRequestSchema
+    : CertificateIssueRequestSchema;
+  const methods = useZodForm<CertificateUpdateRequest>(schema, {
+    defaultValues: defaultValues(defaultEmail, certificate),
   });
 
   useEffect(() => {
-    if (open) methods.reset(defaultValues(defaultEmail));
-  }, [defaultEmail, methods, open]);
+    if (open) methods.reset(defaultValues(defaultEmail, certificate));
+  }, [certificate, defaultEmail, methods, open]);
 
-  async function onSubmit(values: CertificateIssueRequest) {
-    const message = await issueCertificate.mutateAsync(values);
+  async function onSubmit(values: CertificateUpdateRequest) {
+    const message = certificate
+      ? await updateCertificate.mutateAsync({ id: certificate.id, request: values })
+      : await issueCertificate.mutateAsync(values);
     if (message.success) onClose();
   }
 
@@ -63,7 +79,7 @@ export default function CertificateFormModal({
     <Modal
       open={open}
       onCancel={onClose}
-      title={t('pages.certificates.addCertificate')}
+      title={certificate ? t('edit') : t('pages.certificates.addCertificate')}
       footer={null}
       width={760}
       destroyOnHidden
@@ -141,6 +157,7 @@ export default function CertificateFormModal({
                 id="certificate-cloudflare-token"
                 aria-label={t('pages.certificates.cloudflareToken')}
                 autoComplete="off"
+                placeholder={certificate ? '••••••••' : undefined}
               />
             </FormField>
           </SettingListItem>
@@ -211,9 +228,9 @@ export default function CertificateFormModal({
             <Button
               type="primary"
               htmlType="submit"
-              loading={issueCertificate.isPending}
+              loading={issueCertificate.isPending || updateCertificate.isPending}
             >
-              {t('pages.certificates.issue')}
+              {certificate ? t('save') : t('pages.certificates.issue')}
             </Button>
           </div>
         </Form>

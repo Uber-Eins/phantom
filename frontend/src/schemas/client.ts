@@ -143,7 +143,6 @@ export const ClientFormSchema = z.object({
     .trim()
     .min(1, 'pages.clients.email')
     .refine((v) => !hasForbiddenClientChars(v), 'pages.clients.emailInvalidChars'),
-  subId: z.string().refine((v) => !hasForbiddenClientChars(v), 'pages.clients.subIdInvalidChars'),
   uuid: z.string(),
   password: z.string(),
   auth: z.string(),
@@ -180,7 +179,6 @@ export const ClientBulkAddFormSchema = z.object({
   emailPrefix: z.string(),
   emailPostfix: z.string(),
   quantity: z.number().int().min(1).max(1000),
-  subId: z.string(),
   comment: z.string(),
   flow: z.string(),
   totalGB: z.number().min(0),

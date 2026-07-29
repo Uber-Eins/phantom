@@ -775,6 +775,7 @@ export default function InboundFormModal({
           clearRealityKeypair={clearRealityKeypair}
           genMldsa65={genMldsa65}
           clearMldsa65={clearMldsa65}
+          syncServerName={topologyLocked}
         />
       )}
     </>

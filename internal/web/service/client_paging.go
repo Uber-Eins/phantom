@@ -16,7 +16,6 @@ import (
 // of clients. Modals that need the full record still call /get/:email.
 type ClientSlim struct {
 	Email      string              `json:"email"`
-	SubID      string              `json:"subId"`
 	Enable     bool                `json:"enable"`
 	TotalGB    int64               `json:"totalGB"`
 	ExpiryTime int64               `json:"expiryTime"`
@@ -244,7 +243,6 @@ func buildClientsSummary(all []ClientWithAttachments, onlineSet map[string]struc
 func toClientSlim(c ClientWithAttachments) ClientSlim {
 	return ClientSlim{
 		Email:      c.Email,
-		SubID:      c.SubID,
 		Enable:     c.Enable,
 		TotalGB:    c.TotalGB,
 		ExpiryTime: c.ExpiryTime,
@@ -261,7 +259,7 @@ func clientMatchesSearch(c ClientWithAttachments, needle string) bool {
 	if needle == "" {
 		return true
 	}
-	candidates := [...]string{c.Email, c.SubID, c.Comment, c.UUID, c.Password, c.Auth}
+	candidates := [...]string{c.Email, c.Comment, c.UUID, c.Password, c.Auth}
 	for _, v := range candidates {
 		if v != "" && strings.Contains(strings.ToLower(v), needle) {
 			return true

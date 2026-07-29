@@ -145,6 +145,7 @@ export default function GuidedInboundTab({
             scanRealityTarget={scanRealityTarget}
             scanRealityCandidates={scanRealityCandidates}
             applyRealityScanResult={applyRealityScanResult}
+            syncServerName
           />
           <Alert
             type="info"

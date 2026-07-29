@@ -89,7 +89,6 @@ type Values = ClientFormValues & {
 
 const EMPTY: Values = {
   email: '',
-  subId: '',
   uuid: '',
   password: '',
   auth: '',
@@ -154,7 +153,6 @@ export default function ClientFormModal({
   const email = useWatch({ control: methods.control, name: 'email' });
   const uuid = useWatch({ control: methods.control, name: 'uuid' });
   const password = useWatch({ control: methods.control, name: 'password' });
-  const subId = useWatch({ control: methods.control, name: 'subId' });
   const auth = useWatch({ control: methods.control, name: 'auth' });
   const wgPrivateKey = useWatch({ control: methods.control, name: 'wgPrivateKey' });
 
@@ -169,7 +167,6 @@ export default function ClientFormModal({
       const seed: Values = {
         ...EMPTY,
         email: client.email || '',
-        subId: client.subId || '',
         uuid: client.uuid || '',
         password: client.password || '',
         auth: client.auth || '',
@@ -206,7 +203,6 @@ export default function ClientFormModal({
         ...EMPTY,
         email: RandomUtil.randomLowerAndNum(10),
         uuid: RandomUtil.randomUUID(),
-        subId: RandomUtil.randomLowerAndNum(16),
         password: RandomUtil.randomLowerAndNum(16),
         auth: RandomUtil.randomLowerAndNum(16),
         wgPrivateKey: wgKeypair.privateKey,
@@ -387,7 +383,6 @@ export default function ClientFormModal({
     const schema = isEdit ? ClientFormSchema : ClientCreateFormSchema;
     const validated = schema.safeParse({
       email: values.email,
-      subId: values.subId,
       uuid: values.uuid,
       password: values.password,
       auth: values.auth,
@@ -413,7 +408,6 @@ export default function ClientFormModal({
     const totalBytes = resolveTotalBytes(client ? (client.totalGB ?? 0) : null, values.totalGB);
     const clientPayload: Record<string, unknown> = {
       email: values.email.trim(),
-      subId: values.subId,
       id: values.uuid,
       password: values.password,
       auth: values.auth,
@@ -660,13 +654,6 @@ export default function ClientFormModal({
                         <Space.Compact style={{ display: 'flex' }}>
                           <Input value={password} style={{ flex: 1 }} onChange={(e) => methods.setValue('password', e.target.value)} />
                           <Button aria-label={t('regenerate')} icon={<ReloadOutlined />} onClick={regeneratePassword} />
-                        </Space.Compact>
-                      </Form.Item>
-
-                      <Form.Item label={t('pages.clients.subId')}>
-                        <Space.Compact style={{ display: 'flex' }}>
-                          <Input value={subId} style={{ flex: 1 }} onChange={(e) => methods.setValue('subId', e.target.value)} />
-                          <Button aria-label={t('regenerate')} icon={<ReloadOutlined />} onClick={() => methods.setValue('subId', RandomUtil.randomLowerAndNum(16))} />
                         </Space.Compact>
                       </Form.Item>
 

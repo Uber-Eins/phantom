@@ -4,12 +4,15 @@ import {
   Button,
   Card,
   Input,
+  Popconfirm,
   Space,
   Table,
   Tag,
   type TableColumnType,
 } from 'antd';
 import {
+  DeleteOutlined,
+  EditOutlined,
   MenuOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
@@ -25,6 +28,8 @@ interface CertificateListProps {
   isMobile: boolean;
   onAdd: () => void;
   onConfig: () => void;
+  onEdit: (certificate: CertificateRecord) => void;
+  onDelete: (certificate: CertificateRecord) => void | Promise<void>;
 }
 
 export default function CertificateList({
@@ -32,6 +37,8 @@ export default function CertificateList({
   isMobile,
   onAdd,
   onConfig,
+  onEdit,
+  onDelete,
 }: CertificateListProps) {
   const { t } = useTranslation();
   const { datepicker } = useDatepicker();
@@ -42,7 +49,7 @@ export default function CertificateList({
     if (!query) return certificates;
     return certificates.filter((certificate) => (
       certificate.remark.toLowerCase().includes(query)
-      || certificate.identifiers.toLowerCase().includes(query)
+      || certificate.certificateIdentifiers.toLowerCase().includes(query)
       || certificate.ca.toLowerCase().includes(query)
       || certificate.validationMethod.toLowerCase().includes(query)
     ));
@@ -82,7 +89,7 @@ export default function CertificateList({
     },
     {
       title: t('pages.certificates.identifiers'),
-      dataIndex: 'identifiers',
+      dataIndex: 'certificateIdentifiers',
       key: 'identifiers',
       width: 260,
       render: (value: string) => (
@@ -107,7 +114,38 @@ export default function CertificateList({
       width: 125,
       render: () => <Tag color="green">Cloudflare</Tag>,
     },
-  ], [datepicker, t]);
+    {
+      title: '',
+      key: 'actions',
+      width: 90,
+      fixed: 'right',
+      render: (_value, certificate) => (
+        <Space size={0}>
+          <Button
+            type="text"
+            size="small"
+            icon={<EditOutlined />}
+            aria-label={t('edit')}
+            onClick={() => onEdit(certificate)}
+          />
+          <Popconfirm
+            title={`${t('delete')}?`}
+            okText={t('delete')}
+            cancelText={t('cancel')}
+            onConfirm={() => onDelete(certificate)}
+          >
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t('delete')}
+            />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ], [datepicker, onDelete, onEdit, t]);
 
   return (
     <Card
@@ -155,7 +193,9 @@ export default function CertificateList({
                 <span className="certificate-card-id">#{certificate.id}</span>
                 <strong>{certificate.remark}</strong>
               </div>
-              <div>{certificate.identifiers.split('\n').filter(Boolean).join(', ')}</div>
+              <div>
+                {certificate.certificateIdentifiers.split('\n').filter(Boolean).join(', ')}
+              </div>
               <div className="certificate-card-dates">
                 <span>{t('pages.certificates.issuedAt')}</span>
                 <span>{IntlUtil.formatDate(certificate.issuedAt, datepicker)}</span>
@@ -167,6 +207,25 @@ export default function CertificateList({
                   {certificate.ca === 'zerossl' ? 'ZeroSSL' : "Let's Encrypt"}
                 </Tag>
                 <Tag color="green">Cloudflare</Tag>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  aria-label={t('edit')}
+                  onClick={() => onEdit(certificate)}
+                />
+                <Popconfirm
+                  title={`${t('delete')}?`}
+                  okText={t('delete')}
+                  cancelText={t('cancel')}
+                  onConfirm={() => onDelete(certificate)}
+                >
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    aria-label={t('delete')}
+                  />
+                </Popconfirm>
               </Space>
             </div>
           ))}

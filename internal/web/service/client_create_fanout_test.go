@@ -1,10 +1,41 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Uber-Eins/phantom/v3/internal/database/model"
 )
+
+func TestCreateDoesNotGenerateSubscriptionID(t *testing.T) {
+	setupBulkDB(t)
+	svc := &ClientService{}
+	inboundSvc := &InboundService{}
+	inbound := mkInbound(t, 23000, model.VLESS, `{"clients":[]}`)
+
+	if _, err := svc.Create(inboundSvc, &ClientCreatePayload{
+		Client: model.Client{
+			Email:  "without-sub-id@x",
+			ID:     "aaaaaaaa-1111-2222-3333-444444444444",
+			Enable: true,
+		},
+		InboundIds: []int{inbound.Id},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	record := lookupClientRecord(t, "without-sub-id@x")
+	if record.SubID != "" {
+		t.Fatalf("generated client record subId = %q", record.SubID)
+	}
+	reloaded, err := inboundSvc.GetInbound(inbound.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reloaded.Settings, `"subId"`) {
+		t.Fatalf("new inbound client settings contain subId: %s", reloaded.Settings)
+	}
+}
 
 func TestCreateAcrossManyInboundsUsesOneEmailSnapshot(t *testing.T) {
 	setupBulkDB(t)

@@ -15,6 +15,7 @@ function renderCertificateForm() {
       <CertificateFormModal
         open
         defaultEmail="default@example.com"
+        certificate={null}
         onClose={() => {}}
       />
     </QueryProvider>,
@@ -26,7 +27,9 @@ describe('certificate management', () => {
     setDatepicker('gregorian');
     const onAdd = vi.fn();
     const onConfig = vi.fn();
-    renderWithProviders(
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    const { container } = renderWithProviders(
       <CertificateList
         certificates={[{
           id: 1,
@@ -34,7 +37,8 @@ describe('certificate management', () => {
           addMethod: 'acme',
           ca: 'zerossl',
           validationMethod: 'cloudflare',
-          identifiers: 'example.com\n*.example.com',
+          identifiers: 'renewal.example.com',
+          certificateIdentifiers: 'example.com\n*.example.com',
           email: 'admin@example.com',
           keyType: 'EC256',
           certificateType: 'domain',
@@ -46,20 +50,33 @@ describe('certificate management', () => {
         isMobile={false}
         onAdd={onAdd}
         onConfig={onConfig}
+        onEdit={onEdit}
+        onDelete={onDelete}
       />,
     );
 
-    expect(screen.getByRole('columnheader', { name: 'ID' })).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: 'Issued at' })).toBeTruthy();
-    expect(screen.getByRole('columnheader', { name: 'Expires at' })).toBeTruthy();
+    const headers = Array.from(container.querySelectorAll('th'))
+      .map((header) => header.textContent?.trim());
+    expect(headers).toContain('ID');
+    expect(headers).toContain('Issued at');
+    expect(headers).toContain('Expires at');
     expect(screen.getByText('example.com, *.example.com')).toBeTruthy();
     expect(screen.getByText('ZeroSSL')).toBeTruthy();
     expect(screen.getByText('Cloudflare')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add certificate' }));
-    fireEvent.click(screen.getByRole('button', { name: 'General configuration' }));
+    fireEvent.click(container.querySelector('button[aria-label="Add certificate"]')!);
+    fireEvent.click(container.querySelector('button[aria-label="General configuration"]')!);
+    fireEvent.click(container.querySelector('button[aria-label="Edit"]')!);
+    fireEvent.click(container.querySelector('button[aria-label="Delete"]')!);
+    fireEvent.click(document.querySelector<HTMLButtonElement>(
+      '.ant-popconfirm-buttons .ant-btn-primary',
+    )!);
     expect(onAdd).toHaveBeenCalledOnce();
     expect(onConfig).toHaveBeenCalledOnce();
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({
+      identifiers: 'renewal.example.com',
+    }));
+    expect(onDelete).toHaveBeenCalledOnce();
   });
 
   it('renders the ACME form in the add-certificate modal', () => {

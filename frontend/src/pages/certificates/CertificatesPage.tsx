@@ -15,10 +15,14 @@ import {
   useCertificateConfig,
   useCertificates,
 } from '@/api/queries/useCertificates';
+import { useDeleteCertificate } from '@/api/queries/useIssueCertificate';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useTheme } from '@/hooks/useTheme';
 import AppSidebar from '@/layouts/AppSidebar';
-import type { CertificateConfig } from '@/schemas/certificate';
+import type {
+  CertificateConfig,
+  CertificateRecord,
+} from '@/schemas/certificate';
 import { setMessageInstance } from '@/utils/messageBus';
 
 import CertificateConfigModal from './CertificateConfigModal';
@@ -32,7 +36,9 @@ export default function CertificatesPage() {
   const { isMobile } = useMediaQuery();
   const certificates = useCertificates();
   const certificateConfig = useCertificateConfig();
+  const deleteCertificate = useDeleteCertificate();
   const [formOpen, setFormOpen] = useState(false);
+  const [editingCertificate, setEditingCertificate] = useState<CertificateRecord | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [messageApi, messageContextHolder] = message.useMessage();
 
@@ -84,8 +90,18 @@ export default function CertificatesPage() {
                     <CertificateList
                       certificates={certificates.data ?? []}
                       isMobile={isMobile}
-                      onAdd={() => setFormOpen(true)}
+                      onAdd={() => {
+                        setEditingCertificate(null);
+                        setFormOpen(true);
+                      }}
                       onConfig={() => setConfigOpen(true)}
+                      onEdit={(certificate) => {
+                        setEditingCertificate(certificate);
+                        setFormOpen(true);
+                      }}
+                      onDelete={async (certificate) => {
+                        await deleteCertificate.mutateAsync(certificate.id);
+                      }}
                     />
                   </Col>
                 </Row>
@@ -97,7 +113,11 @@ export default function CertificatesPage() {
         <CertificateFormModal
           open={formOpen}
           defaultEmail={certificateConfig.data?.defaultEmail}
-          onClose={() => setFormOpen(false)}
+          certificate={editingCertificate}
+          onClose={() => {
+            setFormOpen(false);
+            setEditingCertificate(null);
+          }}
         />
         <CertificateConfigModal
           open={configOpen}
