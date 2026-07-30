@@ -111,8 +111,9 @@ func NewTestProcess(xrayConfig *Config, configPath string) *Process {
 }
 
 type process struct {
-	// mu guards the process lifecycle fields (cmd, done, exitErr) plus version and
-	// apiPort, which are written by Start/startCommand/refreshVersion/refreshAPIPort
+	// mu guards the process lifecycle fields (cmd, done, exitErr) plus version,
+	// apiPort, and config, which are written by Start/startCommand/refreshVersion/
+	// refreshAPIPort/SetConfig
 	// while being read concurrently by IsRunning/GetErr/GetResult/GetXrayVersion/
 	// GetAPIPort/Stop from other goroutines (status endpoint, check-xray-running
 	// and traffic jobs). Snapshot under the lock, then do any blocking syscall
@@ -188,6 +189,7 @@ func (p *process) SetOnlineAPISupport(v OnlineAPISupport) {
 var (
 	xrayGracefulStopTimeout = 5 * time.Second
 	xrayForceStopTimeout    = 2 * time.Second
+	xrayVersionTimeout      = 5 * time.Second
 	// OnCrash is called when xray crashes unexpectedly. Set from web layer.
 	OnCrash func(err error)
 )
@@ -265,6 +267,8 @@ func (p *Process) GetAPIPort() int {
 
 // GetConfig returns the configuration used by the Xray process.
 func (p *Process) GetConfig() *Config {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.config
 }
 
@@ -272,6 +276,8 @@ func (p *Process) GetConfig() *Config {
 // process has been reconciled with it through the gRPC API (hot apply), so
 // later change detection compares against what is actually running.
 func (p *Process) SetConfig(config *Config) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.config = config
 }
 
@@ -364,7 +370,9 @@ func (p *process) refreshAPIPort() {
 // refreshVersion updates the version string by running the Xray binary with -version.
 func (p *process) refreshVersion() {
 	version := "Unknown"
-	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "-version")
+	ctx, cancel := context.WithTimeout(context.Background(), xrayVersionTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, GetBinaryPath(), "-version")
 	if data, err := cmd.Output(); err == nil {
 		if datas := bytes.Split(data, []byte(" ")); len(datas) > 1 {
 			version = string(datas[1])

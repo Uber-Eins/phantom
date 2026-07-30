@@ -522,8 +522,8 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.AppStats.Mem = rtm.Sys
 	}
 	status.AppStats.Threads = uint32(runtime.NumGoroutine())
-	if p != nil && p.IsRunning() {
-		status.AppStats.Uptime = p.GetUptime()
+	if process := currentXrayProcess(); process != nil && process.IsRunning() {
+		status.AppStats.Uptime = process.GetUptime()
 	} else {
 		status.AppStats.Uptime = 0
 	}
@@ -566,8 +566,8 @@ func (s *ServerService) AppendStatusSample(t time.Time, status *Status) {
 	systemMetrics.append("tcpCount", t, float64(status.TcpCount))
 	systemMetrics.append("udpCount", t, float64(status.UdpCount))
 	online := 0
-	if p != nil && p.IsRunning() {
-		online = len(p.GetOnlineClients())
+	if process := currentXrayProcess(); process != nil && process.IsRunning() {
+		online = len(process.GetOnlineClients())
 	}
 	systemMetrics.append("online", t, float64(online))
 	if len(status.Loads) >= 3 {
@@ -864,25 +864,26 @@ func (s *ServerService) GetNginxConfig() (string, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
+	backupPath, cleanup, err := s.backupSQLite()
 	if err != nil {
 		return nil, err
 	}
-	// Open the file for reading
-	file, err := os.Open(config.GetDBPath())
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+	defer cleanup()
+	return os.ReadFile(backupPath)
+}
 
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
+func (s *ServerService) backupSQLite() (string, func(), error) {
+	backupDir, err := os.MkdirTemp(filepath.Dir(config.GetDBPath()), ".x-ui-backup-")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-
-	return fileContents, nil
+	cleanup := func() { _ = os.RemoveAll(backupDir) }
+	backupPath := filepath.Join(backupDir, "backup.db")
+	if err := database.BackupSQLite(backupPath); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return backupPath, cleanup, nil
 }
 
 // BackupFilename returns the filename for a database backup, named after the

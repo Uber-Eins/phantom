@@ -18,7 +18,7 @@ func (s *InboundService) disableInvalidInbounds(tx *gorm.DB) (bool, int64, error
 	now := time.Now().Unix() * 1000
 	needRestart := false
 
-	if p != nil {
+	if process := currentXrayProcess(); process != nil {
 		var tags []string
 		err := tx.Table("inbounds").
 			Select("inbounds.tag").
@@ -27,7 +27,7 @@ func (s *InboundService) disableInvalidInbounds(tx *gorm.DB) (bool, int64, error
 		if err != nil {
 			return false, 0, err
 		}
-		_ = s.xrayApi.Init(p.GetAPIPort())
+		_ = s.xrayApi.Init(process.GetAPIPort())
 		for _, tag := range tags {
 			err1 := s.xrayApi.DelInbound(tag)
 			if err1 == nil {
@@ -107,8 +107,8 @@ func (s *InboundService) disableInvalidClients(tx *gorm.DB) (bool, int64, error)
 		localByInbound[t.InboundID][t.Email] = struct{}{}
 	}
 
-	if p != nil && len(targets) > 0 {
-		_ = s.xrayApi.Init(p.GetAPIPort())
+	if process := currentXrayProcess(); process != nil && len(targets) > 0 {
+		_ = s.xrayApi.Init(process.GetAPIPort())
 		for _, t := range targets {
 			err1 := s.xrayApi.RemoveUser(t.Tag, t.Email)
 			if err1 == nil {

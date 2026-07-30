@@ -1,3 +1,4 @@
+import { onNumber } from '@/utils/onNumber';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from 'antd';
@@ -216,10 +217,10 @@ export default function BasicsTab({
                     style={{ width: '100%' }}
                     value={directHappyEyeballs.tryDelayMs}
                     placeholder="150"
-                    onChange={(v) => setDirectHappyEyeballs({
+                    onChange={onNumber((v) => setDirectHappyEyeballs({
                       ...directHappyEyeballs,
-                      tryDelayMs: typeof v === 'number' ? v : 0,
-                    })}
+                      tryDelayMs: v,
+                    }))}
                   />
                 }
               />
